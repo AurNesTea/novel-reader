@@ -1,6 +1,6 @@
 /* Service Worker：快取程式外殼（不含任何小說內容；書在 IndexedDB）。路徑皆為相對路徑，可放在 /repo-name/ 子路徑。
    更新程式後請把 VERSION 加 1，讓舊快取失效。 */
-var VERSION = 'nrw-v1';
+var VERSION = 'nrw-v2';
 var SHELL = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/splitter.js', 'js/worker.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 

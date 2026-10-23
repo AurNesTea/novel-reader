@@ -4,6 +4,7 @@
 
   var KEY_P = 'novelReader.progress.v1';      // 與離線版相同的鍵與格式，方便搬進度
   var KEY_S = 'novelReader.settings.v1';
+  var KEY_F = 'novelReader.shelfFold.v1';      // 書架卡片收合狀態（獨立於進度，不會進匯出的進度 JSON）
   var FORMAT = 'novel-reader-progress';
   var DEFAULTS = { fontSize: 19, lineHeight: 1.9, theme: 'light', font: 'sans', width: 'medium' };
   var EXTRA_DEFAULTS = { tapZones: 'on' };   // 網頁版專屬設定（離線版會忽略）
@@ -24,6 +25,29 @@
   var settings = Object.assign({}, DEFAULTS, EXTRA_DEFAULTS, jget(KEY_S, {}));
 
   function saveProgress() { sset(KEY_P, JSON.stringify(progress)); }
+  var fold = jget(KEY_F, {}); if (!fold || typeof fold !== 'object' || Array.isArray(fold)) fold = {};   // { 書ID: true(收合) | false(展開) }
+  function saveFold() { sset(KEY_F, JSON.stringify(fold)); }
+  var defaultOpenId = null;                   // 沒有手動設定過時，只有「最近讀過的書」預設展開
+  function isCollapsed(id) { return typeof fold[id] === 'boolean' ? fold[id] : id !== defaultOpenId; }
+  function setCardFold(li, collapsed) {
+    li.classList.toggle('collapsed', collapsed);
+    var t = li.querySelector('.fold-toggle'), body = li.querySelector('.book-body');
+    t.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); body.hidden = collapsed;
+  }
+  function updateFoldAll() {
+    var cards = $('bookGrid').children, allCollapsed = cards.length > 0;
+    for (var i = 0; i < cards.length; i++) if (!cards[i].classList.contains('collapsed')) { allCollapsed = false; break; }
+    var b = $('btnFoldAll'); b.textContent = allCollapsed ? '全部展開' : '全部收合'; b.dataset.mode = allCollapsed ? 'expand' : 'collapse';
+    $('foldBar').hidden = LIB.length === 0;
+  }
+  function toggleCard(li) {
+    var c = !li.classList.contains('collapsed');
+    fold[li.dataset.id] = c; saveFold(); setCardFold(li, c); updateFoldAll();
+  }
+  function foldAll(collapsed) {
+    Array.prototype.forEach.call($('bookGrid').children, function (li) { fold[li.dataset.id] = collapsed; setCardFold(li, collapsed); });
+    saveFold(); updateFoldAll();
+  }
   function saveSettings() { sset(KEY_S, JSON.stringify(settings)); }
 
   /* ---------- 小工具 ---------- */
@@ -149,11 +173,16 @@
       var ta = (progress.books[a.id] || {}).t || 0, tb = (progress.books[b.id] || {}).t || 0;
       return tb - ta || (a.title < b.title ? -1 : 1);
     });
+    var top = books[0]; defaultOpenId = (top && (progress.books[top.id] || {}).t) ? top.id : null;
     books.forEach(function (b) {
       var p = progress.books[b.id];
       var li = el('li', 'book-card');
       li.dataset.id = b.id;
-      li.appendChild(el('h3', null, b.title));
+      var h3 = el('h3', 'book-title');
+      var tg = el('button', 'fold-toggle', b.title); tg.type = 'button'; tg.dataset.act = 'fold'; tg.setAttribute('aria-controls', 'body-' + b.id);
+      h3.appendChild(tg); li.appendChild(h3);
+      var body = el('div', 'book-body'); body.id = 'body-' + b.id;
+      var cardEl = li; li = body;               // 以下內容都放進可收合的 body
       var meta = '共 ' + b.chapters + ' 章 · 約 ' + Math.round(b.chars / 10000) + ' 萬字';
       if (b.mode === 'headings' && b.firstNo && b.firstNo > 1) meta += ' · 收錄第 ' + b.firstNo + '–' + b.lastNo + ' 章';
       if (b.mode === 'chunked') meta += ' · 無章名，已自動分段';
@@ -178,8 +207,10 @@
         var det = el('details'); det.appendChild(el('summary', null, '章節檢查（' + notes.length + ' 項）'));
         var ul = el('ul'); notes.forEach(function (n) { ul.appendChild(el('li', null, n)); }); det.appendChild(ul); li.appendChild(det);
       }
+      li = cardEl; li.appendChild(body); setCardFold(li, isCollapsed(b.id));
       grid.appendChild(li);
     });
+    updateFoldAll();
     $('storageWarn').hidden = storageOK;
     $('idbWarn').hidden = dbOK;
     renderStorageInfo();
@@ -526,6 +557,7 @@
       return dbPutBook(meta, chapters).then(function () { return dbDelete(id); });
     }).then(function () {
       if (progress.books[id]) { progress.books[nid] = progress.books[id]; delete progress.books[id]; saveProgress(); }
+      if (typeof fold[id] === 'boolean') { fold[nid] = fold[id]; delete fold[id]; saveFold(); }
       return loadLibrary();
     }).then(function () { renderShelf(); toast('已改名'); }).catch(function () { toast('改名失敗'); });
   }
@@ -554,13 +586,15 @@
     var b = e.target.closest('button'); if (!b) return;
     var li = b.closest('.book-card'); if (!li) return;
     var id = li.dataset.id, act = b.dataset.act;
-    if (act === 'read') location.hash = '#/read/' + id;
+    if (act === 'fold') toggleCard(li);
+    else if (act === 'read') location.hash = '#/read/' + id;
     else if (act === 'delete') deleteBook(id);
     else if (act === 'rename') renameBook(id);
     else if (act === 'reset') {
       if (confirm('確定要清除「' + findBook(id).title + '」的閱讀進度與書籤嗎？')) { delete progress.books[id]; saveProgress(); renderShelf(); }
     }
   });
+  $('btnFoldAll').addEventListener('click', function () { foldAll(this.dataset.mode !== 'expand'); });
   $('btnPickBooks').addEventListener('click', pickBooks);
   $('fileBooks').addEventListener('change', function (e) { importFiles(e.target.files); });
   $('btnBack').addEventListener('click', function () { saveNow(); location.hash = '#/'; });

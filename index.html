@@ -28,6 +28,9 @@
   <div class="import-bar">
     <button type="button" id="btnPickBooks" class="btn primary big">＋ 匯入小說（.txt）</button>
   </div>
+  <div id="foldBar" class="fold-bar" hidden>
+    <button type="button" id="btnFoldAll" class="btn small" data-mode="collapse">全部收合</button>
+  </div>
   <p id="storageWarn" class="warn" hidden>⚠ 此瀏覽器無法使用 localStorage（可能是無痕模式），閱讀進度無法在關閉後保留。請使用「匯出進度」備份。</p>
   <p id="idbWarn" class="warn" hidden>⚠ 此瀏覽器無法使用 IndexedDB（可能是無痕模式），匯入的書只會暫存在記憶體，關閉分頁後就會消失。</p>
   <section id="emptyState" class="empty-state" hidden>
