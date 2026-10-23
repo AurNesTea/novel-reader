@@ -1,0 +1,82 @@
+# 小說書架（網頁版・手機可用）
+
+純靜態、無外部相依的小說閱讀器。**資料夾內完全不含任何小說文字**：書是你在自己的手機／電腦上用「匯入小說」選 `.txt`，
+文字只會存在你那個瀏覽器的 IndexedDB（不會上傳到任何伺服器），所以可以安心放到 GitHub Pages 這類公開網址。
+
+## 功能
+
+- 匯入 `.txt`（可一次選多本）：自動偵測編碼（UTF-8 → GBK 簡體 → Big5 繁體）、在瀏覽器內切章節（規則與離線版 `build.py` 相同：
+  第X章／回／節／卷、序章、楔子、番外、中文與阿拉伯數字、「（1）（2）」分段合併、去掉 `URL:` 行、無章名時約 5000 字分段）。
+  也能選離線版的 `books/*.js` 書檔匯入。
+- 書架：章數、讀到哪一章、進度 %、最後閱讀時間、繼續閱讀、改書名、清除進度、刪除、章節檢查報告。
+- 閱讀：目錄（可搜尋）、書籤、上一章／下一章按鈕、點畫面上緣／下緣翻頁、點中間顯示／隱藏工具列、
+  字體大小、行距、亮色／護眼／夜間、黑體／明體／楷體、版面寬度、鍵盤 ←/→/T/Esc。
+- 進度（章節＋章內段落位置）、書籤、設定存在 `localStorage`，**格式與離線版相同**；書本 ID 也是用書名算出來的
+  （`b` + SHA-1(書名) 前 8 碼），所以「匯出進度」的 JSON 可以在電腦離線版與手機網頁版互相匯入。
+- PWA：可「加入主畫面」，程式外殼由 Service Worker 快取，離線也能開（書本在 IndexedDB，本來就在本機）。
+
+## 手機匯入小說
+
+1. 先把 `.txt` 放到手機能選到的地方：
+   - **Android**：存到「下載」資料夾，或直接在選檔畫面切到「Google 雲端硬碟」選檔（Chrome 會自動下載後匯入）。
+   - **iPhone**：存到「檔案」App（「在我的 iPhone」或 iCloud Drive）；有安裝 Google 雲端硬碟 App 的話，選檔畫面「瀏覽」裡也能選到 Drive。
+2. 用手機瀏覽器開你的網址（Android 用 Chrome、iPhone 用 Safari）。
+3. 按「＋ 匯入小說」，選一個或多個 `.txt`，等進度條跑完（5 MB 的檔案通常幾秒內）。
+4. 回到書架按「開始閱讀」。
+5. 建議「加入主畫面」：iPhone Safari → 分享 → 加入主畫面；Android Chrome → ⋮ → 安裝應用程式／加到主畫面。
+
+### 和電腦版互通進度
+
+- 書名必須與電腦版相同（書名 = 檔名去掉 `.txt` 與開頭的底線）才會對到同一份進度。檔名含冒號（例如「末世:女喪屍」）時，
+  有些手機下載後會把冒號換成底線，這時用書架上的「改書名」改回原本書名即可。
+- 電腦版：書架「匯出進度」→ 把 JSON 傳到手機 → 手機書架「匯入進度」（同一本書取較新者）。反向亦同。
+- 沒匯入對應書籍的進度會先保留，之後匯入同名書就會接上。
+
+## 注意事項
+
+- **資料只在這個瀏覽器**：換瀏覽器、清除網站資料、解除安裝 PWA 都會讓書與進度消失。請定期「匯出進度」備份；書本則重新匯入 txt 即可。
+- **iPhone 儲存空間可能被清除**：iOS Safari 對「很久沒開的網站」可能清掉其本機資料（約 7 天未使用）。
+  **加入主畫面後以 App 方式開啟可避免此限制**；本程式也會呼叫 `navigator.storage.persist()` 申請永久儲存（瀏覽器可能不同意，書架底部會顯示狀態）。
+- 無痕／私密模式無法保存書與進度。
+- 檔案選擇器是系統提供的；若從雲端硬碟選不到檔案，先把檔案下載到手機再選。
+- 本程式沒有做簡轉繁／繁轉簡，簡體字檔案會照原樣顯示。
+
+## 部署到 GitHub Pages（只會公開程式，不含小說）
+
+這個資料夾（`novel-reader-web/`）裡的所有檔案就是要部署的內容（`.nojekyll` 也要一起放）。
+`screenshots-not-for-deploy/` 若存在請不要上傳。
+
+1. 在 GitHub 建立新的 repository（例如 `novel-reader`）。免費帳號的 GitHub Pages 需要 **Public** repo；
+   這個 repo 沒有任何小說內容，公開沒有版權或隱私問題。
+2. 把本資料夾的**內容**（不含 `screenshots-not-for-deploy/`）放到 repo 根目錄並推上 `main` 分支：
+   ```bash
+   cd novel-reader-web
+   git init -b main
+   git add .
+   git reset screenshots-not-for-deploy   # 若有此資料夾
+   git commit -m "novel reader"
+   git remote add origin https://github.com/<你的帳號>/<repo 名稱>.git
+   git push -u origin main
+   ```
+   （或在 GitHub 網頁 → Add file → Upload files，把檔案與資料夾拖進去。）
+3. 到 repo 的 **Settings → Pages**：Build and deployment → Source 選 **Deploy from a branch**，
+   Branch 選 `main`、資料夾選 `/ (root)`，按 Save。
+4. 等 1～2 分鐘，網址是 `https://<你的帳號>.github.io/<repo 名稱>/`（頁面上方會顯示）。
+   所有路徑都是相對路徑，放在子路徑下可正常運作；Pages 預設就是 https，Service Worker 與 IndexedDB 都能用。
+5. 手機打開該網址 → 匯入小說 → 加入主畫面。
+
+### 更新程式
+
+改了程式檔後，請把 `sw.js` 裡的 `VERSION`（`nrw-v1`）改成新的字串（如 `nrw-v2`）再推上去，
+已安裝的手機才會更新快取（開兩次 App 後生效）。
+
+## 檔案結構
+
+```
+index.html  manifest.json  sw.js  .nojekyll
+css/style.css
+js/app.js        介面、IndexedDB、閱讀進度
+js/splitter.js   編碼偵測與切章（移植自離線版 tools/build.py）
+js/worker.js     匯入時在背景執行緒處理，避免畫面卡住
+icons/           App 圖示
+```

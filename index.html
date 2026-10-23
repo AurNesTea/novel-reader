@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f6f4" id="metaTheme">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="小說書架">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>小說書架</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===== 書架 ===== -->
+<main id="shelfView" class="view" hidden>
+  <header class="shelf-head">
+    <h1>📚 我的書架</h1>
+    <div class="shelf-actions">
+      <button type="button" id="btnShelfSettings" class="btn">設定</button>
+    </div>
+  </header>
+  <div class="import-bar">
+    <button type="button" id="btnPickBooks" class="btn primary big">＋ 匯入小說（.txt）</button>
+  </div>
+  <p id="storageWarn" class="warn" hidden>⚠ 此瀏覽器無法使用 localStorage（可能是無痕模式），閱讀進度無法在關閉後保留。請使用「匯出進度」備份。</p>
+  <p id="idbWarn" class="warn" hidden>⚠ 此瀏覽器無法使用 IndexedDB（可能是無痕模式），匯入的書只會暫存在記憶體，關閉分頁後就會消失。</p>
+  <section id="emptyState" class="empty-state" hidden>
+    <h2>書架是空的</h2>
+    <p>這個閱讀器本身不含任何小說，書只存在你自己的裝置裡。</p>
+    <ol>
+      <li>把小說 <strong>.txt</strong> 檔放在手機上（下載到「檔案」App，或放在 Google 雲端硬碟）。</li>
+      <li>按上方「＋ 匯入小說」，可一次選多個檔案。</li>
+      <li>等進度條跑完，書就會出現在書架，之後離線也能讀。</li>
+    </ol>
+    <p class="muted">支援 UTF-8、GBK（簡體）、Big5（繁體）編碼；自動切章節。</p>
+  </section>
+  <ul id="bookGrid" class="book-grid"></ul>
+  <div class="tools-row">
+    <button type="button" id="btnExport" class="btn">匯出進度</button>
+    <button type="button" id="btnImport" class="btn">匯入進度</button>
+  </div>
+  <p id="storageInfo" class="foot-note"></p>
+  <p class="foot-note">閱讀進度與書籍只存在這個瀏覽器中；換裝置請用「匯出進度／匯入進度」。</p>
+</main>
+
+<!-- ===== 閱讀器 ===== -->
+<div id="readerView" class="view" hidden>
+  <header id="topbar" class="topbar">
+    <button type="button" id="btnBack" class="icon-btn" aria-label="回到書架" title="回到書架">←</button>
+    <div class="topbar-title">
+      <div id="barBook" class="bar-book"></div>
+      <div id="barChapter" class="bar-chapter"></div>
+    </div>
+    <button type="button" id="btnBookmark" class="icon-btn" aria-label="加入書籤" title="加入書籤">🔖</button>
+    <button type="button" id="btnToc" class="icon-btn" aria-label="目錄" title="目錄 (T)">☰</button>
+    <button type="button" id="btnSettings" class="icon-btn" aria-label="閱讀設定" title="閱讀設定">Aa</button>
+    <div id="chapterBar" class="chapter-bar"><span id="chapterBarFill"></span></div>
+  </header>
+
+  <article id="article" class="article" tabindex="-1">
+    <h2 id="chapterTitle" class="chapter-title"></h2>
+    <div id="chapterBody" class="chapter-body"></div>
+    <nav class="chapter-nav" aria-label="章節導覽">
+      <button type="button" id="btnPrev2" class="btn">← 上一章</button>
+      <button type="button" id="btnToc2" class="btn">目錄</button>
+      <button type="button" id="btnNext2" class="btn primary">下一章 →</button>
+    </nav>
+    <p id="bookPct" class="foot-note"></p>
+  </article>
+
+  <nav id="bottombar" class="bottombar" aria-label="章節切換">
+    <button type="button" id="btnPrev" class="bb-btn">‹ 上一章</button>
+    <span id="bbPos" class="bb-pos"></span>
+    <button type="button" id="btnNext" class="bb-btn">下一章 ›</button>
+  </nav>
+  <div id="loading" class="loading" hidden>載入中…</div>
+</div>
+
+<!-- ===== 目錄／書籤 抽屜 ===== -->
+<div id="drawerMask" class="mask" hidden></div>
+<aside id="drawer" class="drawer" hidden aria-label="目錄">
+  <div class="drawer-head">
+    <div class="tabs" role="tablist">
+      <button type="button" id="tabToc" class="tab active" role="tab">目錄</button>
+      <button type="button" id="tabBm" class="tab" role="tab">書籤</button>
+    </div>
+    <button type="button" id="btnCloseDrawer" class="icon-btn" aria-label="關閉">✕</button>
+  </div>
+  <div id="paneToc" class="pane">
+    <input id="tocFilter" class="input" type="search" placeholder="搜尋章名或章號…" autocomplete="off">
+    <ol id="tocList" class="toc-list"></ol>
+  </div>
+  <div id="paneBm" class="pane" hidden>
+    <ul id="bmList" class="bm-list"></ul>
+    <p id="bmEmpty" class="foot-note">還沒有書籤。閱讀時按上方的 🔖 可在目前位置加入書籤。</p>
+  </div>
+</aside>
+
+<!-- ===== 設定面板 ===== -->
+<div id="settingsMask" class="mask" hidden></div>
+<section id="settingsPanel" class="sheet" hidden aria-label="閱讀設定">
+  <div class="sheet-head"><strong>閱讀設定</strong><button type="button" id="btnCloseSettings" class="icon-btn" aria-label="關閉">✕</button></div>
+  <div class="row">
+    <label for="setFont">字體大小 <output id="outFont"></output></label>
+    <div class="stepper">
+      <button type="button" id="fontMinus" class="btn">A−</button>
+      <input id="setFont" type="range" min="14" max="36" step="1">
+      <button type="button" id="fontPlus" class="btn">A+</button>
+    </div>
+  </div>
+  <div class="row">
+    <label for="setLine">行距 <output id="outLine"></output></label>
+    <input id="setLine" type="range" min="1.4" max="2.6" step="0.1">
+  </div>
+  <div class="row">
+    <span class="label">主題</span>
+    <div class="seg" id="segTheme">
+      <button type="button" data-v="light">亮色</button>
+      <button type="button" data-v="sepia">護眼</button>
+      <button type="button" data-v="dark">夜間</button>
+    </div>
+  </div>
+  <div class="row">
+    <span class="label">字型</span>
+    <div class="seg" id="segFont">
+      <button type="button" data-v="sans">黑體</button>
+      <button type="button" data-v="serif">明體</button>
+      <button type="button" data-v="kai">楷體</button>
+    </div>
+  </div>
+  <div class="row">
+    <span class="label">版面寬度</span>
+    <div class="seg" id="segWidth">
+      <button type="button" data-v="narrow">窄</button>
+      <button type="button" data-v="medium">中</button>
+      <button type="button" data-v="wide">寬</button>
+    </div>
+  </div>
+  <div class="row">
+    <span class="label">點擊畫面上緣／下緣翻頁（中間顯示或隱藏工具列）</span>
+    <div class="seg" id="segTap">
+      <button type="button" data-v="on">開</button>
+      <button type="button" data-v="off">關</button>
+    </div>
+  </div>
+  <div class="row buttons">
+    <button type="button" id="btnExport2" class="btn">匯出進度</button>
+    <button type="button" id="btnImport2" class="btn">匯入進度</button>
+    <button type="button" id="btnResetSettings" class="btn">還原預設</button>
+  </div>
+  <p class="foot-note">快捷鍵：← 上一章／→ 下一章／T 目錄／Esc 關閉面板</p>
+</section>
+
+<!-- ===== 匯入進度面板 ===== -->
+<div id="importMask" class="mask" hidden></div>
+<section id="importPanel" class="sheet" hidden aria-label="匯入小說">
+  <div class="sheet-head"><strong id="importHead">匯入小說</strong></div>
+  <ul id="importList" class="import-list"></ul>
+  <div class="row buttons"><button type="button" id="btnImportClose" class="btn primary" disabled>完成</button></div>
+</section>
+
+<input id="fileProgress" type="file" accept="application/json,.json" hidden>
+<input id="fileBooks" type="file" accept=".txt,.js,text/*" multiple hidden>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="js/splitter.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
