@@ -88,8 +88,20 @@ button,input{font:inherit;color:inherit}
 .chapter-title{font-size:calc(var(--fs) * 1.25);line-height:1.4;margin:.4em 0 1em;text-align:center}
 .chapter-body p{margin:0 0 .85em;font-size:var(--fs);line-height:var(--lh);text-indent:2em;text-align:justify;word-break:break-word;overflow-wrap:anywhere}
 .chapter-body p.empty{text-indent:0;color:var(--muted);text-align:center}
-.chapter-nav{display:flex;gap:.6rem;justify-content:space-between;margin:2.5rem 0 .5rem}
-.chapter-nav .btn{flex:1;min-height:46px}
+.chapter-end{display:flex;align-items:center;gap:.8rem;margin:2.2rem 0 1.4rem;color:var(--muted);font-size:var(--t-sm);letter-spacing:.08em;font-family:system-ui,sans-serif}
+.chapter-end::before,.chapter-end::after{content:"";flex:1;height:1px;background:var(--line)}
+.chapter-nav{display:flex;flex-direction:column;gap:.4rem;max-width:30rem;margin:0 auto .5rem;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif}
+.next-card{display:flex;flex-direction:column;align-items:flex-start;gap:.15rem;width:100%;min-height:56px;padding:.65rem 1rem;border:0;border-radius:12px;background:var(--accent);color:var(--accent-fg);text-align:left;cursor:pointer;touch-action:manipulation}
+.next-card:hover{filter:brightness(1.06)}
+.next-card:focus-visible,.sub-btn:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.nx-label{font-size:var(--t-xs);opacity:.85;letter-spacing:.04em}
+.nx-title{font-size:var(--t-md);font-weight:650;line-height:1.35;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nx-title:empty{display:none}
+.next-card.done{background:color-mix(in srgb,var(--accent) 14%,var(--card));color:var(--fg);border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line))}
+.nav-sub{display:flex;justify-content:space-between;gap:.4rem}
+.sub-btn{min-height:44px;padding:0 .8rem;background:none;border:1px solid transparent;border-radius:10px;color:var(--muted);font-size:var(--t-sm);cursor:pointer;touch-action:manipulation}
+.sub-btn:hover{border-color:var(--line);color:var(--fg)}
+.nav-sub .sub-btn:only-child,#btnPrev2[hidden]+.sub-btn{margin-left:auto}
 .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:30;color:var(--muted)}
 
 /* drawer / sheet */
@@ -137,9 +149,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .tools-row .muted{color:var(--muted)}
 .bottombar{position:fixed;left:0;right:0;bottom:0;display:flex;align-items:center;background:var(--bar);backdrop-filter:blur(6px);border-top:1px solid var(--line);padding:0 calc(.4rem + var(--sar)) var(--sab) calc(.4rem + var(--sal));z-index:20;transition:transform .2s}
 .bottombar.off{transform:translateY(101%)}
-.bb-btn{flex:0 0 auto;background:none;border:0;min-height:48px;padding:0 1rem;cursor:pointer;color:var(--accent);font-size:.95rem;touch-action:manipulation}
+.bb-btn{flex:0 0 auto;background:none;border:0;min-height:48px;min-width:44px;padding:0 .9rem;cursor:pointer;color:var(--accent);font-size:.95rem;touch-action:manipulation}
 .bb-btn:disabled{opacity:.3}
-.bb-pos{flex:1;text-align:center;color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-prog{position:absolute;left:0;right:0;top:-1px;height:2px;background:transparent;pointer-events:none}
+.bb-prog span{display:block;height:100%;width:0;background:var(--accent);opacity:.55}
+.bb-pos{flex:1;text-align:center;color:var(--muted);font-size:var(--t-xs);font-variant-numeric:tabular-nums;font-family:system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .import-list{list-style:none;margin:.4rem 0;padding:0;max-height:50vh;overflow:auto}
 .import-list li{padding:.55em 0;border-bottom:1px solid var(--line);font-size:.9rem;word-break:break-all}
 .import-list .st{display:block;color:var(--muted);font-size:.8rem;margin-top:.15em}
@@ -183,3 +197,4 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .sheet-sec{margin:1.1rem 0 -.3rem;font-size:var(--t-xs);font-weight:700;letter-spacing:.08em;color:var(--accent)}
 .sheet-head{position:sticky;top:-1rem;background:var(--card);margin:-1rem 0 .2rem;padding:1rem 0 .3rem;z-index:1}
 #readerView ~ .toast,.toast{bottom:calc(4.2rem + var(--sab))}
+@media (min-width:700px){.bottombar{padding-left:max(calc(.4rem + var(--sal)),calc(50vw - 20rem));padding-right:max(calc(.4rem + var(--sar)),calc(50vw - 20rem))}}

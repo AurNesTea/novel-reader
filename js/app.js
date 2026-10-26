@@ -388,6 +388,10 @@
     var atFirst = idx === 0, atLast = idx === book.chapters.length - 1;
     ['btnPrev', 'btnPrev2'].forEach(function (i) { $(i).disabled = atFirst; });
     ['btnNext', 'btnNext2'].forEach(function (i) { $(i).disabled = atLast; });
+    $('btnPrev2').hidden = atFirst; $('btnNext2').hidden = atLast; $('btnShelf2').hidden = !atLast;
+    $('nextTitle').textContent = atLast ? '' : book.chapters[idx + 1][0];
+    var m = /^\s*(第\s*[0-9０-９零〇一二兩三四五六七八九十百千萬]+\s*[章回節卷集話])/.exec(c[0]);
+    $('endMark').textContent = atLast ? '全書完' : (m ? m[1].replace(/\s+/g, '') + ' 完' : '本章完');
     window.scrollTo(0, 0);
     if (pos && (pos.para > 0 || pos.ratio > 0)) {
       if (typeof pos.para === 'number' && pos.para < body.children.length) scrollToPara(pos.para);
@@ -428,8 +432,9 @@
     $('chapterBarFill').style.width = (chapterRatio() * 100) + '%';
     if (state.book) {
       var overall = (state.cum[state.ch] + chapterRatio() * state.lens[state.ch]) / state.total;
-      var txt = '第 ' + (state.ch + 1) + ' / ' + state.book.chapters.length + ' 章 · 全書約 ' + pctStr(overall);
-      $('bookPct').textContent = txt; $('bbPos').textContent = txt;
+      $('bbPos').textContent = (state.ch + 1) + ' / ' + state.book.chapters.length + ' 章 · ' + pctStr(overall);
+      $('bbPos').title = '第 ' + (state.ch + 1) + ' / ' + state.book.chapters.length + ' 章 · 全書約 ' + pctStr(overall);
+      $('bbFill').style.width = Math.min(100, overall * 100) + '%';
     }
   }
   function saveNow() {
@@ -990,6 +995,7 @@
   function wakeIfDirty() { if (cloudOn() && !ND.hasToken() && sget(KEY_DIRTY) && navigator.onLine) cloudWake(true); }
   $('btnToc').addEventListener('click', function () { openDrawer('toc'); });
   $('btnToc2').addEventListener('click', function () { openDrawer('toc'); });
+  $('btnShelf2').addEventListener('click', function () { $('btnBack').click(); });
   $('btnBookmark').addEventListener('click', addBookmark);
   $('btnSettings').addEventListener('click', openSettings);
   $('btnShelfSettings').addEventListener('click', openSettings);
