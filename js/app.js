@@ -1,4 +1,5 @@
-/* 小說閱讀器（網頁版）— 純原生 JS，無外部相依。書本文字只存在使用者裝置的 IndexedDB。 */
+/* 小說閱讀器（網頁版）— 純原生 JS。書本文字只存在使用者裝置的 IndexedDB（本機匯入或從使用者自己的 Google 雲端硬碟下載的快取）。
+   雲端相關（登入、Drive REST）在 js/drive.js；這裡負責書架合併、快取與進度同步。 */
 (function () {
   'use strict';
 
@@ -10,6 +11,16 @@
   var EXTRA_DEFAULTS = { tapZones: 'on' };   // 網頁版專屬設定（離線版會忽略）
   var THEME_COLOR = { light: '#f6f6f4', sepia: '#f4ecd8', dark: '#16181c' };
   var LIB = [];                               // 書籍中繼資料（不含文字）
+  var KEY_ST = 'novelReader.settingsT.v1';     // 設定最後修改時間（同步時新者為準）
+  var KEY_DEL = 'novelReader.deleted.v1';      // 已清除進度的書 { 書ID: 時間 }（同步用，避免被雲端舊資料復活）
+  var KEY_FOLDER = 'novelReader.driveFolder.v1';
+  var KEY_DLIST = 'novelReader.driveList.v1';  // 最後一次的雲端書單（離線時也能顯示）
+  var KEY_SYNC = 'novelReader.sync.v1';        // { at: 上次成功同步時間, fileId: 雲端進度檔 ID }
+  var KEY_DIRTY = 'novelReader.syncDirty.v1';  // 有尚未上傳的變更
+  var SYNC_FILE = 'novel-reader-progress.json';
+  var CFG = window.NOVEL_READER_CONFIG || {};
+  var ND = window.NovelDrive || null;
+  var CLOUD = !!(ND && ND.configured);
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -25,6 +36,11 @@
   var settings = Object.assign({}, DEFAULTS, EXTRA_DEFAULTS, jget(KEY_S, {}));
 
   function saveProgress() { sset(KEY_P, JSON.stringify(progress)); }
+  var settingsT = +sget(KEY_ST) || 0;
+  var deleted = jget(KEY_DEL, {}); if (!deleted || typeof deleted !== 'object' || Array.isArray(deleted)) deleted = {};
+  function saveDeleted() { sset(KEY_DEL, JSON.stringify(deleted)); }
+  // 使用者造成的進度變更：存檔並排程同步
+  function touch() { saveProgress(); markDirty(); }
   var fold = jget(KEY_F, {}); if (!fold || typeof fold !== 'object' || Array.isArray(fold)) fold = {};   // { 書ID: true(收合) | false(展開) }
   function saveFold() { sset(KEY_F, JSON.stringify(fold)); }
   var defaultOpenId = null;                   // 沒有手動設定過時，只有「最近讀過的書」預設展開
@@ -48,7 +64,10 @@
     Array.prototype.forEach.call($('bookGrid').children, function (li) { fold[li.dataset.id] = collapsed; setCardFold(li, collapsed); });
     saveFold(); updateFoldAll();
   }
-  function saveSettings() { sset(KEY_S, JSON.stringify(settings)); }
+  function saveSettings(fromUser) {
+    sset(KEY_S, JSON.stringify(settings));
+    if (fromUser) { settingsT = Date.now(); sset(KEY_ST, String(settingsT)); markDirty(); }
+  }
 
   /* ---------- 小工具 ---------- */
   var toastTimer;
@@ -59,7 +78,9 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function pctStr(p) { return (Math.round((p || 0) * 1000) / 10).toFixed(1).replace(/\.0$/, '') + '%'; }
   function fmtDate(t) { try { return new Date(t).toLocaleString('zh-TW', { hour12: false }); } catch (e) { return ''; } }
-  function findBook(id) { for (var i = 0; i < LIB.length; i++) if (LIB[i].id === id) return LIB[i]; return null; }
+  function findLocal(id) { for (var i = 0; i < LIB.length; i++) if (LIB[i].id === id) return LIB[i]; return null; }
+  // 書架上的一本書：本機（匯入或雲端快取）或雲端書單中的書
+  function findBook(id) { return findLocal(id) || (driveById[id] ? { id: id, title: driveById[id].title, driveOnly: true } : null); }
   function fmtMB(n) { return (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB'; }
 
   /* 書本 ID：與離線版 build.py 相同 —— 'b' + sha1(UTF-8 書名) 前 8 碼 */
@@ -159,37 +180,72 @@
   }
   function changeSetting(k, v) {
     var anchor = state.view === 'read' ? currentPara() : -1;
-    settings[k] = v; saveSettings(); applySettings();
+    settings[k] = v; saveSettings(true); applySettings();
     if (anchor >= 0) scrollToPara(anchor);
   }
   function openSettings() { $('settingsMask').hidden = false; $('settingsPanel').hidden = false; }
   function closeSettings() { $('settingsMask').hidden = true; $('settingsPanel').hidden = true; }
 
   /* ---------- 書架 ---------- */
+  // 合併本機書（匯入／雲端快取）與雲端書單；同一本書（同書名 → 同 ID）只出現一次
+  function shelfEntries() {
+    var map = {}, out = [];
+    LIB.forEach(function (m) { map[m.id] = { id: m.id, title: m.title, meta: m, drive: null }; out.push(map[m.id]); });
+    Object.keys(driveById).forEach(function (id) {
+      var f = driveById[id];
+      if (map[id]) map[id].drive = f;
+      else { map[id] = { id: id, title: f.title, meta: null, drive: f }; out.push(map[id]); }
+    });
+    return out;
+  }
+  function findEntry(id) { var e = shelfEntries(); for (var i = 0; i < e.length; i++) if (e[i].id === id) return e[i]; return null; }
+  function sameVersion(meta, f) {
+    if (!meta || !f || meta.driveId !== f.id) return false;
+    if (meta.md5 && f.md5Checksum) return meta.md5 === f.md5Checksum;
+    return meta.modifiedTime === f.modifiedTime && (!f.size || meta.size === f.size);
+  }
+  // 'local' 本機匯入 | 'cached' 雲端快取（最新） | 'stale' 雲端有新版 | 'remote' 尚未下載 | 'orphan' 快取但不在目前書單
+  function entryKind(e) {
+    if (e.meta && e.meta.source !== 'drive') return 'local';
+    if (e.meta && !e.drive) return 'orphan';
+    if (e.meta) return sameVersion(e.meta, e.drive) ? 'cached' : 'stale';
+    return 'remote';
+  }
   function renderShelf() {
     var grid = $('bookGrid'); grid.textContent = '';
-    $('emptyState').hidden = LIB.length > 0;
-    var books = LIB.slice().sort(function (a, b) {
+    var entries = shelfEntries();
+    $('emptyState').hidden = entries.length > 0;
+    var books = entries.sort(function (a, b) {
       var ta = (progress.books[a.id] || {}).t || 0, tb = (progress.books[b.id] || {}).t || 0;
       return tb - ta || (a.title < b.title ? -1 : 1);
     });
     var top = books[0]; defaultOpenId = (top && (progress.books[top.id] || {}).t) ? top.id : null;
-    books.forEach(function (b) {
-      var p = progress.books[b.id];
+    books.forEach(function (e) {
+      var b = e.meta || {}, kind = entryKind(e), p = progress.books[e.id];
       var li = el('li', 'book-card');
-      li.dataset.id = b.id;
+      li.dataset.id = e.id; li.dataset.kind = kind;
       var h3 = el('h3', 'book-title');
-      var tg = el('button', 'fold-toggle', b.title); tg.type = 'button'; tg.dataset.act = 'fold'; tg.setAttribute('aria-controls', 'body-' + b.id);
+      var tg = el('button', 'fold-toggle', e.title); tg.type = 'button'; tg.dataset.act = 'fold'; tg.setAttribute('aria-controls', 'body-' + e.id);
       h3.appendChild(tg); li.appendChild(h3);
-      var body = el('div', 'book-body'); body.id = 'body-' + b.id;
+      var body = el('div', 'book-body'); body.id = 'body-' + e.id;
       var cardEl = li; li = body;               // 以下內容都放進可收合的 body
-      var meta = '共 ' + b.chapters + ' 章 · 約 ' + Math.round(b.chars / 10000) + ' 萬字';
-      if (b.mode === 'headings' && b.firstNo && b.firstNo > 1) meta += ' · 收錄第 ' + b.firstNo + '–' + b.lastNo + ' 章';
-      if (b.mode === 'chunked') meta += ' · 無章名，已自動分段';
-      li.appendChild(el('div', 'book-meta', meta));
+      var mrow = el('div', 'book-meta');
+      if (kind !== 'local') mrow.appendChild(el('span', 'badge cloud', '雲端'));
+      else if (e.drive) mrow.appendChild(el('span', 'badge', '本機匯入'));
+      var meta;
+      if (e.meta) {
+        meta = '共 ' + b.chapters + ' 章 · 約 ' + Math.round(b.chars / 10000) + ' 萬字';
+        if (b.mode === 'headings' && b.firstNo && b.firstNo > 1) meta += ' · 收錄第 ' + b.firstNo + '–' + b.lastNo + ' 章';
+        if (b.mode === 'chunked') meta += ' · 無章名，已自動分段';
+        if (kind === 'cached') meta += ' · 已存在這台裝置（離線可讀）';
+        if (kind === 'stale') meta += ' · 雲端有新版本，開啟時會重新下載';
+        if (kind === 'orphan') meta += ' · 已快取（不在目前的雲端資料夾）';
+      } else meta = (e.drive.size ? fmtMB(e.drive.size) + ' · ' : '') + '尚未下載，開啟時會從雲端硬碟下載';
+      mrow.appendChild(document.createTextNode(meta));
+      li.appendChild(mrow);
       var last = el('div', 'book-last');
       if (p && typeof p.ch === 'number') {
-        last.textContent = '讀到：' + (p.title || ('第 ' + (p.ch + 1) + ' 章')) + '（' + (p.ch + 1) + '/' + b.chapters + '） · ' + pctStr(p.pct) + (p.t ? ' · ' + fmtDate(p.t) : '');
+        last.textContent = '讀到：' + (p.title || ('第 ' + (p.ch + 1) + ' 章')) + '（' + (p.ch + 1) + (b.chapters ? '/' + b.chapters : '') + '） · ' + pctStr(p.pct) + (p.t ? ' · ' + fmtDate(p.t) : '');
       } else last.textContent = '尚未開始閱讀';
       li.appendChild(last);
       var bar = el('div', 'pbar'); var fill = el('span'); fill.style.width = ((p && p.pct) ? Math.min(100, p.pct * 100) : 0) + '%'; bar.appendChild(fill); li.appendChild(bar);
@@ -197,39 +253,91 @@
       var go = el('button', 'btn primary', p ? '繼續閱讀' : '開始閱讀'); go.type = 'button'; go.dataset.act = 'read'; act.appendChild(go);
       li.appendChild(act);
       var act2 = el('div', 'book-actions sec');
-      [['rename', '改書名'], p ? ['reset', '清除進度'] : null, ['delete', '刪除']].forEach(function (x) {
+      var btns = kind === 'local' ? [e.drive ? null : ['rename', '改書名'], p ? ['reset', '清除進度'] : null, ['delete', '刪除']]
+                                  : [p ? ['reset', '清除進度'] : null, e.meta ? ['uncache', '清除快取'] : null];
+      btns.forEach(function (x) {
         if (!x) return;
         var bt = el('button', 'btn small' + (x[0] === 'delete' ? ' danger' : ''), x[1]); bt.type = 'button'; bt.dataset.act = x[0]; act2.appendChild(bt);
       });
-      li.appendChild(act2);
-      var notes = (b.notes || []).concat(b.analysis || []);
+      if (act2.children.length) li.appendChild(act2);
+      var notes = (b.notes || []).concat(b.analysis || []).concat(e.drive && e.drive.dupNote ? [e.drive.dupNote] : []);
       if (notes.length) {
         var det = el('details'); det.appendChild(el('summary', null, '章節檢查（' + notes.length + ' 項）'));
         var ul = el('ul'); notes.forEach(function (n) { ul.appendChild(el('li', null, n)); }); det.appendChild(ul); li.appendChild(det);
       }
-      li = cardEl; li.appendChild(body); setCardFold(li, isCollapsed(b.id));
+      li = cardEl; li.appendChild(body); setCardFold(li, isCollapsed(e.id));
       grid.appendChild(li);
     });
     updateFoldAll();
     $('storageWarn').hidden = storageOK;
     $('idbWarn').hidden = dbOK;
     renderStorageInfo();
+    renderCloud();
   }
 
   /* ---------- 讀者狀態 ---------- */
   var state = { view: 'shelf', book: null, bookId: null, ch: 0, cum: [], lens: [], total: 1, restoring: false };
   var saveTimer = null;
 
+  var loadAbort = null;
+  function setLoading(text, frac) {
+    $('loadingText').textContent = text;
+    $('loadingBar').hidden = frac == null;
+    if (frac != null) $('loadingFill').style.width = Math.round(Math.min(1, Math.max(0, frac)) * 100) + '%';
+  }
+  // 取得章節：本機／快取直接讀；雲端書（未下載或有新版）在線上時下載 → 切章 → 存入快取
+  function loadChapters(entry, signal) {
+    var kind = entryKind(entry);
+    if (kind === 'local' || kind === 'cached' || kind === 'orphan' || (kind === 'stale' && !navigator.onLine)) {
+      return dbGetText(entry.id).then(function (ch) {
+        if (ch && ch.length) { if (kind === 'stale') toast('目前離線，先使用這台裝置上的舊版本'); return ch; }
+        if (entry.drive) return downloadBook(entry, signal);
+        throw new Error('找不到這本書的內容，請重新匯入');
+      });
+    }
+    return downloadBook(entry, signal);
+  }
+  function downloadBook(entry, signal) {
+    var f = entry.drive;
+    if (!navigator.onLine) return Promise.reject(new Error('目前離線，這本書還沒下載到這台裝置，連上網路後再開啟'));
+    setLoading('連線 Google 雲端硬碟…', 0);
+    return ND.download(f.id, f.size, function (got, total) {
+      setLoading('下載中 ' + fmtMB(got) + ' / ' + fmtMB(total) + '（' + Math.round(got / total * 100) + '%）', got / total * 0.6);
+    }, signal).then(function (buf) {
+      if (signal && signal.aborted) throw Object.assign(new Error('已取消'), { code: 'abort' });
+      setLoading('切分章節…', 0.6);
+      return processInWorker(f.name, buf, function (stage, frac) { setLoading(stage + ' ' + Math.round(frac * 100) + '%', 0.6 + frac * 0.35); });
+    }).then(function (res) {
+      if (!res.chapters || !res.chapters.length) throw new Error('這個檔案沒有可用內容');
+      var meta = { id: entry.id, title: entry.title, chapters: res.chapters.length, chars: res.chars, mode: res.mode, firstNo: res.firstNo, lastNo: res.lastNo,
+                   notes: res.notes || [], analysis: res.analysis || [], added: Date.now(), srcName: f.name, size: f.size, enc: res.enc,
+                   source: 'drive', driveId: f.id, modifiedTime: f.modifiedTime, md5: f.md5Checksum };
+      setLoading('存到這台裝置…', 0.97);
+      requestPersist();
+      return dbPutBook(meta, res.chapters).then(loadLibrary).then(function () { return res.chapters; });
+    });
+  }
+  // 開書前先等雲端進度拉下來（最多 6 秒），避免用舊進度覆蓋其他裝置的新進度
+  function waitSync() {
+    var p = wakeP || syncing; if (!p) return Promise.resolve();
+    return Promise.race([p.catch(function () {}), new Promise(function (r) { setTimeout(r, 6000); })]);
+  }
   function openBook(id) {
     state.view = 'read'; state.bookId = id; state.book = null;
     $('shelfView').hidden = true; $('readerView').hidden = false; $('loading').hidden = false;
+    setLoading('載入中…', null);
     $('chapterTitle').textContent = ''; $('chapterBody').textContent = '';
     showBars(true);
-    var meta = findBook(id);
-    dbGetText(id).then(function (chapters) {
-      if (state.bookId !== id) return;
+    var entry = findEntry(id);
+    if (loadAbort) loadAbort.abort();
+    var ac = window.AbortController ? new AbortController() : null; loadAbort = ac;
+    waitSync().then(function () {
+      if (state.bookId !== id) return null;
+      return loadChapters(entry, ac && ac.signal);
+    }).then(function (chapters) {
+      if (state.bookId !== id || !chapters) return;
       if (!chapters || !chapters.length) throw new Error('找不到這本書的內容，請重新匯入');
-      var book = { id: id, title: meta.title, chapters: chapters };
+      var book = { id: id, title: entry.title, chapters: chapters };
       state.book = book;
       var cum = [], acc = 0, lens = [];
       chapters.forEach(function (c) { cum.push(acc); lens.push(c[1].length); acc += c[1].length; });
@@ -240,7 +348,10 @@
       $('loading').hidden = true;
       renderChapter(ch, p ? { para: p.para, ratio: p.ratio } : null);
     }).catch(function (e) {
-      $('loading').hidden = true; toast('錯誤：' + e.message); location.hash = '#/';
+      if (state.bookId !== id) return;
+      $('loading').hidden = true;
+      if (!(e && e.code === 'abort')) toast('錯誤：' + (e && e.message || e));
+      location.hash = '#/';
     });
   }
 
@@ -309,12 +420,15 @@
     if (state.view !== 'read' || !state.book || state.restoring) return;
     var ratio = chapterRatio();
     var rec = progress.books[state.bookId] || {};
+    var prevPos = { ch: rec.ch, para: rec.para, ratio: rec.ratio };
     rec.ch = state.ch; rec.title = state.book.chapters[state.ch][0];
     rec.para = currentPara(); rec.ratio = Math.round(ratio * 1000) / 1000;
     rec.pct = Math.min(1, (state.cum[state.ch] + ratio * state.lens[state.ch]) / state.total);
-    rec.t = Date.now();
+    var changed = rec.ch !== prevPos.ch || rec.para !== prevPos.para || rec.ratio !== prevPos.ratio;
+    // 只有位置真的改變才更新時間戳：同步時以 t 判斷哪台裝置較新，停在原處的裝置不該蓋掉別台的新進度
+    if (changed || !rec.t) rec.t = Date.now();
     progress.books[state.bookId] = rec;
-    saveProgress();
+    if (changed) touch(); else saveProgress();
   }
   function scheduleSave() {
     updateChapterBar();
@@ -394,10 +508,12 @@
     saveNow();
     var rec = progress.books[state.bookId] || (progress.books[state.bookId] = { ch: state.ch });
     rec.bm = rec.bm || [];
-    rec.bm.push({ ch: state.ch, title: state.book.chapters[state.ch][0], para: currentPara(), ratio: Math.round(chapterRatio() * 1000) / 1000, t: Date.now() });
+    var nb = { ch: state.ch, title: state.book.chapters[state.ch][0], para: currentPara(), ratio: Math.round(chapterRatio() * 1000) / 1000, t: Date.now() };
+    rec.bm.push(nb);
+    if (rec.bmDel) rec.bmDel = rec.bmDel.filter(function (d) { return d.k !== nb.ch + ':' + nb.para; });
     if (rec.bm.length > 200) rec.bm.shift();
     rec.t = Date.now();
-    saveProgress(); toast('已加入書籤');
+    touch(); toast('已加入書籤');
   }
 
   /* ---------- 匯出／匯入進度（格式與離線版相同） ---------- */
@@ -433,9 +549,9 @@
         });
         if (d.settings && typeof d.settings === 'object') {
           Object.keys(DEFAULTS).forEach(function (k) { if (d.settings[k] != null) settings[k] = d.settings[k]; });
-          saveSettings(); applySettings();
+          saveSettings(true); applySettings();
         }
-        saveProgress(); route();
+        touch(); route();
         toast('匯入完成：更新 ' + n + ' 本，保留較新的本機進度 ' + kept + ' 本（未匯入書籍的進度會先保留）');
       } catch (e) { toast('匯入失敗：' + e.message); }
     };
@@ -556,11 +672,256 @@
       var meta = Object.assign({}, b, { id: nid, title: nt });
       return dbPutBook(meta, chapters).then(function () { return dbDelete(id); });
     }).then(function () {
-      if (progress.books[id]) { progress.books[nid] = progress.books[id]; delete progress.books[id]; saveProgress(); }
+      if (progress.books[id]) { progress.books[nid] = progress.books[id]; progress.books[nid].t = Date.now(); delete progress.books[id]; deleted[id] = Date.now(); delete deleted[nid]; saveDeleted(); touch(); }
       if (typeof fold[id] === 'boolean') { fold[nid] = fold[id]; delete fold[id]; saveFold(); }
       return loadLibrary();
     }).then(function () { renderShelf(); toast('已改名'); }).catch(function () { toast('改名失敗'); });
   }
+
+  /* ---------- Google 雲端硬碟：書單 ---------- */
+  var driveList = jget(KEY_DLIST, null);       // { folderId, files:[…], at }
+  var driveById = {};
+  var syncInfo = jget(KEY_SYNC, {}); if (!syncInfo || typeof syncInfo !== 'object') syncInfo = {};
+  function saveSyncInfo() { sset(KEY_SYNC, JSON.stringify(syncInfo)); }
+  function folderId() { return sget(KEY_FOLDER) || CFG.DEFAULT_FOLDER_ID || ''; }
+  function cloudOn() { return CLOUD && ND.isSignedIn(); }
+  function indexDrive() {
+    driveById = {};
+    if (!cloudOn() || !driveList || driveList.folderId !== folderId() || !Array.isArray(driveList.files)) return;
+    driveList.files.forEach(function (f) {
+      var title = NovelSplit.titleFromFilename(f.name) || '未命名';
+      var id = bookIdFor(title), prev = driveById[id];
+      var g = Object.assign({}, f, { title: title });
+      if (prev) {   // 同書名的多個檔案：用最新修改的那一個
+        var keep = (g.modifiedTime > prev.modifiedTime) ? g : prev, other = keep === g ? prev : g;
+        keep.dupNote = '雲端資料夾有多個同名檔案，使用最新修改的「' + keep.name + '」（另有「' + other.name + '」）';
+        driveById[id] = keep;
+      } else driveById[id] = g;
+    });
+  }
+  var listing = null;
+  function refreshDriveList(quiet) {
+    if (!cloudOn()) return Promise.resolve();
+    if (listing) return listing;
+    var fid = folderId();
+    if (!fid) return Promise.resolve();
+    cloudMsg('讀取雲端書單…');
+    listing = ND.listTxt(fid).then(function (files) {
+      driveList = { folderId: fid, files: files, at: Date.now() }; sset(KEY_DLIST, JSON.stringify(driveList));
+      indexDrive(); cloudMsg(files.length ? '' : '這個雲端資料夾裡沒有 .txt 檔');
+      if (state.view === 'shelf') renderShelf();
+    }).catch(function (e) {
+      cloudMsg(e.code === 'offline' ? '目前離線，顯示上次的雲端書單' : e.code === 'auth' ? '' : '無法讀取雲端書單：' + e.message);
+      if (!quiet && e.code !== 'auth' && e.code !== 'offline') toast('無法讀取雲端書單：' + e.message);
+      if (e.code === 'auth') renderCloud();
+    }).then(function () { listing = null; });
+    return listing;
+  }
+  function cloudMsg(t) { var m = $('cloudMsg'); m.textContent = t || ''; m.hidden = !t; }
+
+  /* ---------- 跨裝置進度同步（appDataFolder/novel-reader-progress.json） ---------- */
+  var syncing = null, syncAgain = false, pushTimer = null, wakeP = null, lastRemote = null;
+  var syncStat = { s: 'idle', msg: '' };
+  var dirtySeq = 0;
+  function markDirty() { if (!cloudOn()) return; dirtySeq++; sset(KEY_DIRTY, '1'); schedulePush(); renderSync(); }
+  function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(function () { syncNow(); }, 8000); }
+  function stableStr(v) {
+    if (Array.isArray(v)) return '[' + v.map(stableStr).join(',') + ']';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().filter(function (k) { return v[k] !== undefined; }).map(function (k) { return JSON.stringify(k) + ':' + stableStr(v[k]); }).join(',') + '}';
+    return JSON.stringify(v);
+  }
+  function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+  function syncPayload(st) {
+    return { format: FORMAT, version: 1, exportedAt: new Date().toISOString(), settings: st.settings, settingsUpdatedAt: st.settingsT, books: st.books, deleted: st.deleted };
+  }
+  function localState() { return { books: progress.books, deleted: deleted, settings: settings, settingsT: settingsT }; }
+  function remoteState(d) {
+    d = (d && d.format === FORMAT && d.books && typeof d.books === 'object') ? d : {};
+    return { books: d.books || {}, deleted: (d.deleted && typeof d.deleted === 'object') ? d.deleted : {}, settings: d.settings || null, settingsT: +d.settingsUpdatedAt || 0 };
+  }
+  // 合併：每本書較新的 t 為準；書籤取聯集（刪除過的書籤以刪除時間判斷）；清除進度的紀錄比進度新就刪除；設定較新者為準
+  function mergeStates(L, R) {
+    var out = { books: {}, deleted: {}, settings: L.settings, settingsT: L.settingsT };
+    Object.keys(L.deleted).concat(Object.keys(R.deleted)).forEach(function (id) { out.deleted[id] = Math.max(+L.deleted[id] || 0, +R.deleted[id] || 0); });
+    var ids = {}; Object.keys(L.books).concat(Object.keys(R.books)).forEach(function (id) { ids[id] = 1; });
+    Object.keys(ids).forEach(function (id) {
+      var a = L.books[id], b = R.books[id];
+      if (a && typeof a.ch !== 'number') a = null; if (b && typeof b.ch !== 'number') b = null;
+      if (!a && !b) return;
+      var win = !b || (a && (a.t || 0) >= (b.t || 0)) ? a : b, lose = win === a ? b : a;
+      if (out.deleted[id] && out.deleted[id] >= (win.t || 0)) return;
+      var rec = clone(win);
+      var dels = {};
+      [win, lose].forEach(function (r) { ((r && r.bmDel) || []).forEach(function (d) { if (d && d.k) dels[d.k] = Math.max(dels[d.k] || 0, d.t || 0); }); });
+      var bms = {}, order = [];
+      [win, lose].forEach(function (r) {
+        ((r && r.bm) || []).forEach(function (m) {
+          var k = m.ch + ':' + m.para;
+          if (dels[k] && dels[k] >= (m.t || 0)) return;
+          if (!bms[k]) order.push(k);
+          if (!bms[k] || (m.t || 0) > (bms[k].t || 0)) bms[k] = clone(m);
+        });
+      });
+      var bm = order.map(function (k) { return bms[k]; }).sort(function (x, y) { return (x.t || 0) - (y.t || 0); }).slice(-200);
+      if (bm.length) rec.bm = bm; else delete rec.bm;
+      var dl = Object.keys(dels).map(function (k) { return { k: k, t: dels[k] }; }).sort(function (x, y) { return x.t - y.t; }).slice(-200);
+      if (dl.length) rec.bmDel = dl; else delete rec.bmDel;
+      out.books[id] = rec;
+    });
+    if (R.settings && R.settingsT > L.settingsT) {
+      var ns = Object.assign({}, settings);
+      Object.keys(DEFAULTS).concat(Object.keys(EXTRA_DEFAULTS)).forEach(function (k) { if (R.settings[k] != null) ns[k] = R.settings[k]; });
+      out.settings = ns; out.settingsT = R.settingsT;
+    }
+    return out;
+  }
+  function sameState(a, b) { return stableStr({ b: a.books, d: a.deleted, s: a.settings, t: a.settingsT }) === stableStr({ b: b.books, d: b.deleted, s: b.settings, t: b.settingsT }); }
+  function applyMerged(m) {
+    var cur = state.view === 'read' && state.book ? clone(progress.books[state.bookId]) : null;
+    var settingsChanged = stableStr(m.settings) !== stableStr(settings);
+    progress.books = m.books; deleted = m.deleted; saveProgress(); saveDeleted();
+    if (settingsChanged || m.settingsT !== settingsT) {
+      var anchor = state.view === 'read' && state.book ? currentPara() : -1;
+      settings = Object.assign({}, DEFAULTS, EXTRA_DEFAULTS, m.settings); settingsT = m.settingsT; saveSettings(); sset(KEY_ST, String(settingsT)); applySettings();
+      if (anchor >= 0) scrollToPara(anchor);
+    }
+    if (state.view === 'shelf') renderShelf();
+    else if (state.book) {
+      var nw = progress.books[state.bookId];
+      // 其他裝置讀得比較新：跳到那個位置
+      if (nw && cur && (nw.t || 0) > (cur.t || 0) && (nw.ch !== cur.ch || nw.para !== cur.para)) {
+        renderChapter(Math.min(nw.ch, state.book.chapters.length - 1), { para: nw.para, ratio: nw.ratio });
+        toast('已套用其他裝置的進度：' + (nw.title || ('第 ' + (nw.ch + 1) + ' 章')));
+      }
+      if (!$('drawer').hidden && !$('paneBm').hidden) buildBookmarks();
+    }
+  }
+  function setSync(s, msg) { syncStat = { s: s, msg: msg || '' }; renderSync(); }
+  function syncNow() {
+    if (!cloudOn()) return Promise.resolve();
+    if (syncing) { syncAgain = true; return syncing; }
+    if (state.view === 'read' && state.book && !state.restoring) saveNow();   // 先把目前位置寫入
+    clearTimeout(pushTimer); pushTimer = null;
+    if (!navigator.onLine) { setSync('offline'); return Promise.resolve(); }
+    if (!ND.hasToken()) { setSync('needauth'); return Promise.resolve(); }
+    setSync('syncing');
+    var seq0 = dirtySeq;
+    var fid = syncInfo.fileId;
+    var files;
+    syncing = ND.appFind(SYNC_FILE).then(function (list) {
+      files = list;
+      if (!files.length) return [];
+      return Promise.all(files.map(function (f) { return ND.appRead(f.id).catch(function (e) { if (e.code === 'notfound') return null; throw e; }); }));
+    }).then(function (datas) {
+      var R = { books: {}, deleted: {}, settings: null, settingsT: 0 };
+      datas.forEach(function (d) { if (d) R = mergeStates(remoteState(d), R); });   // 萬一有多個進度檔（兩台裝置同時建立），全部合併
+      lastRemote = R;
+      var M = mergeStates(localState(), R);
+      if (!sameState(M, localState())) applyMerged(M);
+      var target = files.length ? files[0].id : null;
+      fid = target;
+      var text = JSON.stringify(syncPayload(localState()));
+      if (!target) return ND.appCreate(SYNC_FILE, text).then(function (id) { fid = id; lastRemote = mergeStates(localState(), R); });
+      if (!sameState(localState(), R) || files.length > 1) return ND.appUpdate(target, text).then(function () { lastRemote = clone(localState()); });
+    }).then(function () {
+      syncInfo.fileId = fid; syncInfo.at = Date.now(); saveSyncInfo();
+      if (dirtySeq === seq0) { try { localStorage.removeItem(KEY_DIRTY); } catch (e) { /* ignore */ } } else schedulePush();
+      setSync('ok');
+    }).catch(function (e) {
+      if (e.code === 'offline') setSync('offline');
+      else if (e.code === 'auth') setSync('needauth');
+      else setSync('error', e.message);
+    }).then(function () {
+      syncing = null;
+      if (syncAgain) { syncAgain = false; return syncNow(); }
+    });
+    return syncing;
+  }
+  // 不觸發同步排程的位置存檔（同步前先把目前位置寫入）
+  // 頁面關閉／切到背景：用 keepalive 送出最後狀態（不等待結果；下次開啟會再完整同步）
+  function flushOnHide() {
+    if (!cloudOn() || !sget(KEY_DIRTY) || !syncInfo.fileId || syncing) return;
+    var st = lastRemote ? mergeStates(localState(), lastRemote) : localState();
+    if (ND.appUpdateKeepalive(syncInfo.fileId, JSON.stringify(syncPayload(st)))) lastRemote = clone(st);
+  }
+  // 使用者操作時：權杖過期就靜默重新取得（prompt:''，會短暫閃一下 Google 視窗），然後同步
+  function cloudWake(interactive) {
+    if (!cloudOn()) return Promise.resolve();
+    if (ND.hasToken()) { if (interactive) return syncNow(); return Promise.resolve(); }
+    if (!interactive || !navigator.onLine) { setSync(navigator.onLine ? 'needauth' : 'offline'); return Promise.resolve(); }
+    var p = ND.ensureToken(true).then(function () {
+      var l = refreshDriveList(true);
+      return Promise.all([syncNow(), l]);
+    }, function (e) { setSync(e.code === 'offline' ? 'offline' : 'needauth', e.message); if (e.code !== 'closed') toast(e.message); });
+    wakeP = p.then(function () { wakeP = null; });
+    return wakeP;
+  }
+  function renderSync() {
+    var t, cls = syncStat.s;
+    var dirty = !!sget(KEY_DIRTY);
+    if (!cloudOn()) t = '';
+    else if (syncStat.s === 'syncing') t = '同步中…';
+    else if (syncStat.s === 'offline' || (!navigator.onLine && cloudOn())) { t = '離線，稍後同步'; cls = 'offline'; }
+    else if (syncStat.s === 'needauth') t = '需要重新連線 Google 才能同步（按「立即同步」）';
+    else if (syncStat.s === 'error') t = '同步錯誤：' + syncStat.msg;
+    else if (syncInfo.at) t = (dirty ? '有變更待同步 · 上次' : '已同步 ') + fmtTime(syncInfo.at);
+    else t = dirty ? '有變更待同步' : '尚未同步';
+    Array.prototype.forEach.call(document.querySelectorAll('.sync-status'), function (n) { n.textContent = t; n.dataset.s = cls; });
+  }
+  function fmtTime(t) {
+    var d = new Date(t), now = new Date();
+    try {
+      return d.toDateString() === now.toDateString() ? d.toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' }) : d.toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return ''; }
+  }
+  function renderCloud() {
+    var box = $('cloudBox');
+    $('cloudDisabled').hidden = CLOUD;
+    $('btnSignIn').disabled = !CLOUD;
+    var on = cloudOn(), a = CLOUD ? ND.account() : {};
+    $('btnSignIn').hidden = on; $('btnSignOut').hidden = !on; $('cloudSync').hidden = !on;
+    $('cloudAccount').textContent = !CLOUD ? '' : on ? (a.email ? a.email : '已登入') + (ND.hasToken() ? '' : '（需重新連線）') : '未登入';
+    $('rowCloud').hidden = !on;
+    $('footLocal').hidden = on; $('footCloud').hidden = !on;
+    box.dataset.on = on ? '1' : '0';
+    renderSync();
+  }
+  function signIn() {
+    if (!CLOUD) return;
+    if (!navigator.onLine) { toast('目前離線，無法登入 Google'); return; }
+    cloudMsg('等待 Google 登入…');
+    var p = ND.signIn().then(function () {
+      cloudMsg(''); renderCloud(); toast('已登入 Google');
+      return Promise.all([refreshDriveList(), syncNow()]);
+    }, function (e) { cloudMsg(''); renderCloud(); toast(e.message); });
+    wakeP = p.then(function () { wakeP = null; });
+  }
+  function signOut() {
+    var drv = LIB.filter(function (m) { return m.source === 'drive'; });
+    if (!confirm('確定要登出 Google 嗎？\n登出後不會再同步進度，這台裝置上的進度會保留。')) return;
+    var wipe = drv.length && confirm('也要刪除這台裝置上從雲端下載的 ' + drv.length + ' 本書快取嗎？\n（按「取消」則保留，離線仍可閱讀）');
+    flushOnHide();
+    ND.signOut();
+    driveList = null; driveById = {}; try { localStorage.removeItem(KEY_DLIST); localStorage.removeItem(KEY_DIRTY); } catch (e) { /* ignore */ }
+    syncInfo = {}; saveSyncInfo(); lastRemote = null; setSync('idle');
+    var p = Promise.resolve();
+    if (wipe) drv.forEach(function (m) { p = p.then(function () { return dbDelete(m.id); }); });
+    p.then(loadLibrary).then(function () { route(); renderShelf(); toast('已登出 Google'); });
+  }
+  function uncacheBook(id) {
+    var b = findLocal(id); if (!b) return;
+    if (!confirm('要刪除「' + b.title + '」在這台裝置上的快取嗎？\n（閱讀進度保留，下次開啟會重新從雲端硬碟下載。）')) return;
+    dbDelete(id).then(loadLibrary).then(function () { renderShelf(); toast('已清除快取'); }).catch(function () { toast('清除失敗'); });
+  }
+  function saveFolder(v) {
+    var id = v ? ND.parseFolderId(v) : '';
+    if (v && !id) { toast('看不懂這個資料夾網址或 ID'); return; }
+    if (!id || id === CFG.DEFAULT_FOLDER_ID) { try { localStorage.removeItem(KEY_FOLDER); } catch (e) { /* ignore */ } } else sset(KEY_FOLDER, id);
+    $('inpFolder').value = folderId();
+    indexDrive(); renderShelf(); toast('已設定雲端書庫資料夾');
+    if (cloudOn()) { if (ND.hasToken()) refreshDriveList(); else cloudWake(true); }
+  }
+  ND && ND.onChange && ND.onChange(function () { renderCloud(); });
 
   /* ---------- 路由 ---------- */
   function route() {
@@ -572,6 +933,7 @@
       openBook(m[1]);
     } else {
       saveNow();
+      if (loadAbort) { loadAbort.abort(); loadAbort = null; }
       state.view = 'shelf'; state.book = null; state.bookId = null; tocBuiltFor = null;
       $('readerView').hidden = true; $('shelfView').hidden = false; $('loading').hidden = true;
       document.title = '小說書架';
@@ -587,17 +949,19 @@
     var li = b.closest('.book-card'); if (!li) return;
     var id = li.dataset.id, act = b.dataset.act;
     if (act === 'fold') toggleCard(li);
-    else if (act === 'read') location.hash = '#/read/' + id;
+    else if (act === 'read') { cloudWake(true); location.hash = '#/read/' + id; }
+    else if (act === 'uncache') uncacheBook(id);
     else if (act === 'delete') deleteBook(id);
     else if (act === 'rename') renameBook(id);
     else if (act === 'reset') {
-      if (confirm('確定要清除「' + findBook(id).title + '」的閱讀進度與書籤嗎？')) { delete progress.books[id]; saveProgress(); renderShelf(); }
+      if (confirm('確定要清除「' + findBook(id).title + '」的閱讀進度與書籤嗎？')) { delete progress.books[id]; deleted[id] = Date.now(); saveDeleted(); touch(); renderShelf(); }
     }
   });
   $('btnFoldAll').addEventListener('click', function () { foldAll(this.dataset.mode !== 'expand'); });
   $('btnPickBooks').addEventListener('click', pickBooks);
   $('fileBooks').addEventListener('change', function (e) { importFiles(e.target.files); });
-  $('btnBack').addEventListener('click', function () { saveNow(); location.hash = '#/'; });
+  $('btnBack').addEventListener('click', function () { saveNow(); cloudWake(true); location.hash = '#/'; });
+  function wakeIfDirty() { if (cloudOn() && !ND.hasToken() && sget(KEY_DIRTY) && navigator.onLine) cloudWake(true); }
   $('btnToc').addEventListener('click', function () { openDrawer('toc'); });
   $('btnToc2').addEventListener('click', function () { openDrawer('toc'); });
   $('btnBookmark').addEventListener('click', addBookmark);
@@ -607,8 +971,30 @@
   $('settingsMask').addEventListener('click', closeSettings);
   $('btnCloseDrawer').addEventListener('click', closeDrawer);
   $('drawerMask').addEventListener('click', closeDrawer);
-  ['btnPrev', 'btnPrev2'].forEach(function (i) { $(i).addEventListener('click', function () { gotoChapter(state.ch - 1); }); });
-  ['btnNext', 'btnNext2'].forEach(function (i) { $(i).addEventListener('click', function () { gotoChapter(state.ch + 1); }); });
+  ['btnPrev', 'btnPrev2'].forEach(function (i) { $(i).addEventListener('click', function () { gotoChapter(state.ch - 1); wakeIfDirty(); }); });
+  ['btnNext', 'btnNext2'].forEach(function (i) { $(i).addEventListener('click', function () { gotoChapter(state.ch + 1); wakeIfDirty(); }); });
+  $('btnSignIn').addEventListener('click', signIn);
+  $('btnSignOut').addEventListener('click', signOut);
+  Array.prototype.forEach.call(document.querySelectorAll('.btn-sync'), function (b) {
+    b.addEventListener('click', function () {
+      if (!navigator.onLine) { setSync('offline'); toast('目前離線，連上網路後會自動同步'); return; }
+      if (ND.hasToken()) { syncNow(); refreshDriveList(); } else cloudWake(true);
+    });
+  });
+  $('btnRefreshList').addEventListener('click', function () { if (ND.hasToken()) refreshDriveList(); else cloudWake(true); });
+  $('btnSaveFolder').addEventListener('click', function () { saveFolder($('inpFolder').value); });
+  $('inpFolder').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveFolder($('inpFolder').value); });
+  $('btnDefaultFolder').addEventListener('click', function () { saveFolder(''); });
+  window.addEventListener('pagehide', flushOnHide);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') { flushOnHide(); return; }
+    if (cloudOn() && ND.hasToken()) {
+      syncNow();
+      if (!driveList || Date.now() - (driveList.at || 0) > 600000) refreshDriveList(true);
+    } else renderSync();
+  });
+  window.addEventListener('online', function () { if (cloudOn() && ND.hasToken()) { syncNow(); if (!driveList) refreshDriveList(true); } else renderSync(); });
+  window.addEventListener('offline', function () { if (cloudOn()) setSync('offline'); });
   $('tabToc').addEventListener('click', function () { showTab('toc'); });
   $('tabBm').addEventListener('click', function () { showTab('bm'); });
   $('tocFilter').addEventListener('input', filterToc);
@@ -620,7 +1006,10 @@
     var b = e.target.closest('button'); if (!b) return;
     var i = parseInt(b.dataset.i, 10), rec = progress.books[state.bookId]; if (!rec || !rec.bm || !rec.bm[i]) return;
     if (b.classList.contains('go')) { var bm = rec.bm[i]; closeDrawer(); renderChapter(bm.ch, { para: bm.para, ratio: bm.ratio }); }
-    else { rec.bm.splice(i, 1); saveProgress(); buildBookmarks(); }
+    else {
+      var gone = rec.bm.splice(i, 1)[0]; rec.bmDel = (rec.bmDel || []).concat([{ k: gone.ch + ':' + gone.para, t: Date.now() }]).slice(-200);
+      rec.t = Date.now(); touch(); buildBookmarks();
+    }
   });
   $('setFont').addEventListener('input', function (e) { changeSetting('fontSize', parseInt(e.target.value, 10)); });
   $('setLine').addEventListener('input', function (e) { changeSetting('lineHeight', parseFloat(e.target.value)); });
@@ -629,7 +1018,7 @@
   [['segTheme', 'theme'], ['segFont', 'font'], ['segWidth', 'width'], ['segTap', 'tapZones']].forEach(function (p) {
     $(p[0]).addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) changeSetting(p[1], b.dataset.v); });
   });
-  $('btnResetSettings').addEventListener('click', function () { Object.assign(settings, DEFAULTS, EXTRA_DEFAULTS); saveSettings(); applySettings(); });
+  $('btnResetSettings').addEventListener('click', function () { Object.assign(settings, DEFAULTS, EXTRA_DEFAULTS); saveSettings(true); applySettings(); });
   $('btnExport').addEventListener('click', exportProgress);
   $('btnExport2').addEventListener('click', exportProgress);
   $('btnImport').addEventListener('click', pickProgress);
@@ -655,6 +1044,13 @@
 
   /* ---------- 啟動 ---------- */
   applySettings();
+  indexDrive();
+  $('inpFolder').value = folderId();
+  if (cloudOn()) {
+    ND.preload();
+    if (ND.hasToken() && navigator.onLine) { syncNow(); refreshDriveList(true); }
+    else setSync(navigator.onLine ? 'needauth' : 'offline');
+  }
   openDB().then(loadLibrary).catch(function () { LIB = []; }).then(function () {
     route();
     if (LIB.length) requestPersist().then(renderStorageInfo);
