@@ -8,7 +8,7 @@
   var KEY_F = 'novelReader.shelfFold.v1';      // 書架卡片收合狀態（獨立於進度，不會進匯出的進度 JSON）
   var FORMAT = 'novel-reader-progress';
   var DEFAULTS = { fontSize: 19, lineHeight: 1.9, theme: 'light', font: 'sans', width: 'medium' };
-  var EXTRA_DEFAULTS = { tapZones: 'on' };   // 網頁版專屬設定（離線版會忽略）
+  var EXTRA_DEFAULTS = { tapZones: 'on', typeset: 'on' };   // 網頁版專屬設定（離線版會忽略）
   var THEME_COLOR = { light: '#f6f6f4', sepia: '#f4ecd8', dark: '#16181c' };
   var LIB = [];                               // 書籍中繼資料（不含文字）
   var KEY_ST = 'novelReader.settingsT.v1';     // 設定最後修改時間（同步時新者為準）
@@ -175,9 +175,13 @@
     $('metaTheme').setAttribute('content', THEME_COLOR[settings.theme] || THEME_COLOR.light);
     $('setFont').value = settings.fontSize; $('outFont').textContent = settings.fontSize + 'px';
     $('setLine').value = settings.lineHeight; $('outLine').textContent = Number(settings.lineHeight).toFixed(1);
-    [['segTheme', 'theme'], ['segFont', 'font'], ['segWidth', 'width'], ['segTap', 'tapZones']].forEach(function (p) {
+    [['segTheme', 'theme'], ['segFont', 'font'], ['segWidth', 'width'], ['segTap', 'tapZones'], ['segTypeset', 'typeset']].forEach(function (p) {
       Array.prototype.forEach.call($(p[0]).children, function (b) { b.classList.toggle('on', b.dataset.v === settings[p[1]]); });
     });
+    // 排版優化開關改變（含重設、其他裝置同步）→ 重新排這一章，停在同一個原始行
+    if (state.view === 'read' && state.book && typeof state.tsOn === 'boolean' && state.tsOn !== (settings.typeset !== 'off')) {
+      renderChapter(state.ch, { para: currentPara(), ratio: 0 });
+    }
   }
   function changeSetting(k, v) {
     var anchor = state.view === 'read' ? currentPara() : -1;
@@ -382,7 +386,14 @@
     document.title = c[0] + ' — ' + book.title;
     var body = $('chapterBody'); body.textContent = '';
     var frag = document.createDocumentFragment();
-    c[1].split('\n').forEach(function (t) { if (t) frag.appendChild(el('p', null, t)); });   // textContent → 自動跳脫 HTML
+    // 排版優化：段落重排＋引號統一（只影響顯示）；para 位置一律以「原始行號」記錄，舊進度與其他裝置相容
+    var tsOn = state.tsOn = settings.typeset !== 'off';
+    var paras = window.Typeset.layout(c[1], tsOn);
+    state.rawN = paras.length ? paras[paras.length - 1].start + paras[paras.length - 1].count : 0;
+    paras.forEach(function (q) {
+      var pe = el('p', null, tsOn ? q.text.replace(/^[\s　]+/, '') : q.text);   // textContent → 自動跳脫 HTML
+      pe.dataset.s = q.start; pe.dataset.n = q.count; frag.appendChild(pe);
+    });
     if (!frag.childNodes.length) frag.appendChild(el('p', 'empty', '（本章沒有內容）'));
     body.appendChild(frag);
     var atFirst = idx === 0, atLast = idx === book.chapters.length - 1;
@@ -394,7 +405,7 @@
     $('endMark').textContent = atLast ? '全書完' : (m ? m[1].replace(/\s+/g, '') + ' 完' : '本章完');
     window.scrollTo(0, 0);
     if (pos && (pos.para > 0 || pos.ratio > 0)) {
-      if (typeof pos.para === 'number' && pos.para < body.children.length) scrollToPara(pos.para);
+      if (typeof pos.para === 'number' && pos.para < state.rawN) scrollToPara(pos.para);
       else window.scrollTo(0, Math.max(0, (pos.ratio || 0) * (document.documentElement.scrollHeight - window.innerHeight)));
     }
     requestAnimationFrame(function () { requestAnimationFrame(function () { state.restoring = false; updateChapterBar(); saveNow(); }); });
@@ -409,6 +420,7 @@
 
   /* ---------- 位置追蹤 ---------- */
   function barH() { return $('topbar').offsetHeight || 48; }
+  // 回傳目前畫面頂端的「原始行號」：先找到段落，合併段落再依高度比例換算成其中第幾行
   function currentPara() {
     var ps = $('chapterBody').children, n = ps.length; if (!n) return 0;
     var probe = barH() + 6, lo = 0, hi = n - 1;
@@ -416,13 +428,21 @@
       var mid = (lo + hi) >> 1;
       if (ps[mid].getBoundingClientRect().bottom > probe) hi = mid; else lo = mid + 1;
     }
-    return lo;
+    var p = ps[lo], s = +p.dataset.s, k = +p.dataset.n || 1;
+    if (isNaN(s)) return lo;
+    if (k <= 1) return s;
+    var r = p.getBoundingClientRect(), f = r.height > 0 ? (probe - r.top) / r.height : 0;
+    return s + Math.min(k - 1, Math.max(0, Math.round(f * k)));
   }
+  // 捲到原始行號 i 所在的段落（合併段落內依比例定位）
   function scrollToPara(i) {
     var ps = $('chapterBody').children; if (!ps.length) return;
-    i = Math.min(Math.max(i, 0), ps.length - 1);
-    var top = ps[i].getBoundingClientRect().top + window.pageYOffset;
-    window.scrollTo(0, Math.max(0, top - barH() - 6));
+    i = Math.max(i, 0);
+    var lo = 0, hi = ps.length - 1;
+    while (lo < hi) { var mid = (lo + hi + 1) >> 1; var sm = +ps[mid].dataset.s; if (isNaN(sm) || sm <= i) lo = mid; else hi = mid - 1; }
+    var p = ps[lo], s = +p.dataset.s, k = +p.dataset.n || 1, r = p.getBoundingClientRect();
+    var off = (!isNaN(s) && k > 1) ? Math.min(k - 1, i - s) / k * r.height : 0;
+    window.scrollTo(0, Math.max(0, r.top + window.pageYOffset + off - barH() - 6));
   }
   function chapterRatio() {
     var max = document.documentElement.scrollHeight - window.innerHeight;
@@ -595,7 +615,7 @@
   function processInWorker(name, buf, onProg) {
     return new Promise(function (resolve, reject) {
       var w;
-      try { w = new Worker('js/worker.js'); } catch (e) { return fallback(); }
+      try { w = new Worker('js/worker.js?v=7'); } catch (e) { return fallback(); }
       var got = false;
       w.onmessage = function (ev) {
         var d = ev.data; got = true;
@@ -1047,7 +1067,7 @@
   $('setLine').addEventListener('input', function (e) { changeSetting('lineHeight', parseFloat(e.target.value)); });
   $('fontMinus').addEventListener('click', function () { changeSetting('fontSize', Math.max(14, settings.fontSize - 1)); });
   $('fontPlus').addEventListener('click', function () { changeSetting('fontSize', Math.min(36, settings.fontSize + 1)); });
-  [['segTheme', 'theme'], ['segFont', 'font'], ['segWidth', 'width'], ['segTap', 'tapZones']].forEach(function (p) {
+  [['segTheme', 'theme'], ['segFont', 'font'], ['segWidth', 'width'], ['segTap', 'tapZones'], ['segTypeset', 'typeset']].forEach(function (p) {
     $(p[0]).addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) changeSetting(p[1], b.dataset.v); });
   });
   $('btnResetSettings').addEventListener('click', function () { Object.assign(settings, DEFAULTS, EXTRA_DEFAULTS); saveSettings(true); applySettings(); });
@@ -1072,6 +1092,13 @@
   /* ---------- PWA：Service Worker（僅 https 或 localhost） ---------- */
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+    // 新版 SW 接手（舊版 SW 可能剛用舊快取回應了這次載入）→ 剛開啟就自動重新整理一次，否則提示
+    var hadCtrl = !!navigator.serviceWorker.controller, swReloaded = false, t0 = Date.now();
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadCtrl || swReloaded) return; swReloaded = true;
+      if (Date.now() - t0 < 15000) { try { saveNow(); } catch (e) {} location.reload(); }
+      else toast('已更新到新版，重新開啟即可套用');
+    });
   }
 
   /* ---------- 啟動 ---------- */

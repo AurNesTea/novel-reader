@@ -15,7 +15,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
 
@@ -96,7 +96,7 @@
     <nav class="chapter-nav" aria-label="章節導覽">
       <div class="nav-row">
         <button type="button" id="btnPrev2" class="nav-btn ghost">← 上一章</button>
-        <button type="button" id="btnToc2" class="nav-btn ghost">☰ 目錄</button>
+        <button type="button" id="btnToc2" class="nav-btn ghost toc">☰ 目錄</button>
         <button type="button" id="btnNext2" class="nav-btn primary">下一章 →</button>
         <button type="button" id="btnShelf2" class="nav-btn primary" hidden>回書架</button>
       </div>
@@ -177,6 +177,13 @@
     </div>
   </div>
   <div class="row">
+    <span class="label">排版優化（合併被斷開的句子、引號改為「」）</span>
+    <div class="seg" id="segTypeset">
+      <button type="button" data-v="on">開</button>
+      <button type="button" data-v="off">關</button>
+    </div>
+  </div>
+  <div class="row">
     <span class="label">點擊畫面上緣／下緣翻頁（中間顯示或隱藏工具列）</span>
     <div class="seg" id="segTap">
       <button type="button" data-v="on">開</button>
@@ -214,9 +221,10 @@
 <input id="fileBooks" type="file" accept=".txt,.js,text/*" multiple hidden>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/config.js"></script>
-<script src="js/splitter.js"></script>
-<script src="js/drive.js"></script>
-<script src="js/app.js"></script>
+<script src="js/config.js?v=7"></script>
+<script src="js/splitter.js?v=7"></script>
+<script src="js/drive.js?v=7"></script>
+<script src="js/typeset.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>
