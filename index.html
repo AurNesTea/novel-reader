@@ -24,49 +24,51 @@
   <header class="shelf-head">
     <h1>📚 我的書架</h1>
     <div class="shelf-actions">
-      <button type="button" id="btnShelfSettings" class="btn">設定</button>
+      <button type="button" id="btnPickBooks" class="btn small ghost" title="匯入 .txt 小說">＋ 匯入</button>
+      <button type="button" id="btnShelfSettings" class="icon-btn" aria-label="設定" title="設定">⚙</button>
     </div>
   </header>
   <section id="cloudBox" class="cloud-box" aria-label="Google 雲端硬碟">
-    <div class="cloud-head">
-      <div class="cloud-who"><strong>☁ Google 雲端硬碟</strong> <span id="cloudAccount" class="muted"></span></div>
-      <button type="button" id="btnSignIn" class="btn primary small">登入 Google</button>
-      <button type="button" id="btnSignOut" class="btn small" hidden>登出</button>
-    </div>
-    <p id="cloudDisabled" class="muted" hidden>雲端功能尚未啟用（還沒設定 Google 用戶端 ID）。目前請用下方「匯入小說」讀本機檔案。</p>
-    <div id="cloudSync" class="cloud-sync" hidden>
-      <span class="sync-status" role="status"></span>
-      <span class="cloud-btns">
-        <button type="button" class="btn small btn-sync" id="btnSyncNow">立即同步</button>
-        <button type="button" class="btn small" id="btnRefreshList">重新整理書單</button>
+    <div class="cloud-row">
+      <span class="cloud-ico" aria-hidden="true">☁</span>
+      <span class="cloud-who"><span class="cloud-name">Google 雲端硬碟</span><span id="cloudAccount" class="cloud-acct"></span></span>
+      <span id="cloudSync" class="cloud-sync" hidden>
+        <span class="sync-status" role="status"></span>
+        <button type="button" class="icon-btn btn-sync" id="btnSyncNow" aria-label="立即同步" title="立即同步">⟳</button>
       </span>
+      <button type="button" id="btnCloudMenu" class="icon-btn" aria-label="雲端選項" title="雲端選項" aria-expanded="false" aria-controls="cloudMenu" hidden>⋯</button>
+      <button type="button" id="btnSignIn" class="btn primary small">登入</button>
     </div>
-    <p id="cloudMsg" class="muted" hidden></p>
+    <div id="cloudMenu" class="pop-menu" hidden>
+      <button type="button" id="btnRefreshList" class="menu-item">↻ 重新整理書單</button>
+      <button type="button" id="btnSignOut" class="menu-item danger" hidden>登出 Google</button>
+    </div>
+    <p id="cloudDisabled" class="cloud-note" hidden>雲端功能尚未啟用（未設定 Google 用戶端 ID），請用「＋ 匯入」讀本機檔案。</p>
+    <p id="cloudMsg" class="cloud-note" hidden></p>
   </section>
-  <div class="import-bar">
-    <button type="button" id="btnPickBooks" class="btn primary big">＋ 匯入小說（.txt）</button>
-  </div>
   <div id="foldBar" class="fold-bar" hidden>
-    <button type="button" id="btnFoldAll" class="btn small" data-mode="collapse">全部收合</button>
+    <span id="shelfCount" class="shelf-count"></span>
+    <button type="button" id="btnFoldAll" class="link-btn" data-mode="collapse">全部收合</button>
   </div>
   <p id="storageWarn" class="warn" hidden>⚠ 此瀏覽器無法使用 localStorage（可能是無痕模式），閱讀進度無法在關閉後保留。請使用「匯出進度」備份。</p>
   <p id="idbWarn" class="warn" hidden>⚠ 此瀏覽器無法使用 IndexedDB（可能是無痕模式），匯入的書只會暫存在記憶體，關閉分頁後就會消失。</p>
   <section id="emptyState" class="empty-state" hidden>
     <h2>書架是空的</h2>
     <p>這個閱讀器本身不含任何小說，書只存在你自己的裝置或你自己的 Google 雲端硬碟裡。</p>
-    <p><strong>方法一：</strong>按上方「登入 Google」，直接讀取雲端硬碟資料夾裡的 .txt（資料夾可在「設定」更改）。</p>
+    <p><strong>方法一：</strong>按上方「登入」，直接讀取雲端硬碟資料夾裡的 .txt（資料夾可在「設定」更改）。</p>
     <p><strong>方法二：</strong>匯入手機上的檔案：</p>
     <ol>
       <li>把小說 <strong>.txt</strong> 檔放在手機上（下載到「檔案」App，或放在 Google 雲端硬碟）。</li>
-      <li>按上方「＋ 匯入小說」，可一次選多個檔案。</li>
+      <li>按右上角「＋ 匯入」，可一次選多個檔案。</li>
       <li>等進度條跑完，書就會出現在書架，之後離線也能讀。</li>
     </ol>
     <p class="muted">支援 UTF-8、GBK（簡體）、Big5（繁體）編碼；自動切章節。</p>
   </section>
   <ul id="bookGrid" class="book-grid"></ul>
   <div class="tools-row">
-    <button type="button" id="btnExport" class="btn">匯出進度</button>
-    <button type="button" id="btnImport" class="btn">匯入進度</button>
+    <button type="button" id="btnExport" class="link-btn">匯出進度</button>
+    <span class="muted" aria-hidden="true">·</span>
+    <button type="button" id="btnImport" class="link-btn">匯入進度</button>
   </div>
   <p id="storageInfo" class="foot-note"></p>
   <p class="foot-note" id="footLocal">閱讀進度與書籍只存在這個瀏覽器中；換裝置請用「匯出進度／匯入進度」，或登入 Google 自動同步。</p>
@@ -130,8 +132,9 @@
 
 <!-- ===== 設定面板 ===== -->
 <div id="settingsMask" class="mask" hidden></div>
-<section id="settingsPanel" class="sheet" hidden aria-label="閱讀設定">
-  <div class="sheet-head"><strong>閱讀設定</strong><button type="button" id="btnCloseSettings" class="icon-btn" aria-label="關閉">✕</button></div>
+<section id="settingsPanel" class="sheet" hidden aria-label="設定">
+  <div class="sheet-head"><strong>設定</strong><button type="button" id="btnCloseSettings" class="icon-btn" aria-label="關閉">✕</button></div>
+  <h3 class="sheet-sec">閱讀</h3>
   <div class="row">
     <label for="setFont">字體大小 <output id="outFont"></output></label>
     <div class="stepper">
@@ -175,15 +178,17 @@
       <button type="button" data-v="off">關</button>
     </div>
   </div>
+  <h3 class="sheet-sec">雲端硬碟</h3>
   <div class="row" id="rowCloud" hidden>
     <span class="label">雲端同步</span>
-    <div class="cloud-sync"><span class="sync-status"></span><button type="button" class="btn small btn-sync" id="btnSyncNow2">立即同步</button></div>
+    <div class="set-sync"><span class="sync-status"></span><button type="button" class="btn small btn-sync" id="btnSyncNow2">⟳ 立即同步</button></div>
   </div>
   <div class="row">
     <label for="inpFolder">雲端書庫資料夾（貼上 Google 雲端硬碟資料夾網址或 ID）</label>
     <div class="stepper"><input id="inpFolder" class="input" type="text" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" id="btnSaveFolder" class="btn">儲存</button></div>
     <button type="button" id="btnDefaultFolder" class="btn small">還原預設資料夾</button>
   </div>
+  <h3 class="sheet-sec">進度備份</h3>
   <div class="row buttons">
     <button type="button" id="btnExport2" class="btn">匯出進度</button>
     <button type="button" id="btnImport2" class="btn">匯入進度</button>

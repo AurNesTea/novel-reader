@@ -54,7 +54,8 @@
     var cards = $('bookGrid').children, allCollapsed = cards.length > 0;
     for (var i = 0; i < cards.length; i++) if (!cards[i].classList.contains('collapsed')) { allCollapsed = false; break; }
     var b = $('btnFoldAll'); b.textContent = allCollapsed ? '全部展開' : '全部收合'; b.dataset.mode = allCollapsed ? 'expand' : 'collapse';
-    $('foldBar').hidden = LIB.length === 0;
+    $('foldBar').hidden = cards.length === 0;
+    $('shelfCount').textContent = cards.length + ' 本書';
   }
   function toggleCard(li) {
     var c = !li.classList.contains('collapsed');
@@ -227,44 +228,60 @@
       var h3 = el('h3', 'book-title');
       var tg = el('button', 'fold-toggle', e.title); tg.type = 'button'; tg.dataset.act = 'fold'; tg.setAttribute('aria-controls', 'body-' + e.id);
       h3.appendChild(tg); li.appendChild(h3);
+      var pct = (p && p.pct) ? Math.min(100, p.pct * 100) : 0;
+      if (p && typeof p.ch === 'number') { tg.dataset.pct = pctStr(p.pct); li.style.setProperty('--p', pct + '%'); }
+      if (kind !== 'local') tg.dataset.cloud = '1';
       var body = el('div', 'book-body'); body.id = 'body-' + e.id;
       var cardEl = li; li = body;               // 以下內容都放進可收合的 body
       var mrow = el('div', 'book-meta');
       if (kind !== 'local') mrow.appendChild(el('span', 'badge cloud', '雲端'));
       else if (e.drive) mrow.appendChild(el('span', 'badge', '本機匯入'));
-      var meta;
+      var meta, info = [];
       if (e.meta) {
         meta = '共 ' + b.chapters + ' 章 · 約 ' + Math.round(b.chars / 10000) + ' 萬字';
-        if (b.mode === 'headings' && b.firstNo && b.firstNo > 1) meta += ' · 收錄第 ' + b.firstNo + '–' + b.lastNo + ' 章';
-        if (b.mode === 'chunked') meta += ' · 無章名，已自動分段';
-        if (kind === 'cached') meta += ' · 已存在這台裝置（離線可讀）';
-        if (kind === 'stale') meta += ' · 雲端有新版本，開啟時會重新下載';
-        if (kind === 'orphan') meta += ' · 已快取（不在目前的雲端資料夾）';
-      } else meta = (e.drive.size ? fmtMB(e.drive.size) + ' · ' : '') + '尚未下載，開啟時會從雲端硬碟下載';
-      mrow.appendChild(document.createTextNode(meta));
+        if (kind === 'cached') meta += ' · 離線可讀';
+        if (kind === 'stale') meta += ' · 雲端有新版';
+        if (kind === 'orphan') meta += ' · 已快取';
+        if (b.mode === 'headings' && b.firstNo && b.firstNo > 1) info.push('收錄第 ' + b.firstNo + '–' + b.lastNo + ' 章');
+        if (b.mode === 'chunked') { meta += ' · 無章名'; info.push('無章名，已自動分段'); }
+        if (kind === 'cached') info.push('已存在這台裝置，離線也能讀');
+        if (kind === 'stale') info.push('雲端有新版本，開啟時會重新下載');
+        if (kind === 'orphan') info.push('已快取，但不在目前的雲端資料夾');
+      } else { meta = (e.drive.size ? fmtMB(e.drive.size) + ' · ' : '') + '尚未下載'; info.push('開啟時會從雲端硬碟下載'); }
+      mrow.appendChild(el('span', 'meta-txt', meta));
       li.appendChild(mrow);
+      var prog = el('div', 'book-prog');
       var last = el('div', 'book-last');
       if (p && typeof p.ch === 'number') {
-        last.textContent = '讀到：' + (p.title || ('第 ' + (p.ch + 1) + ' 章')) + '（' + (p.ch + 1) + (b.chapters ? '/' + b.chapters : '') + '） · ' + pctStr(p.pct) + (p.t ? ' · ' + fmtDate(p.t) : '');
-      } else last.textContent = '尚未開始閱讀';
-      li.appendChild(last);
-      var bar = el('div', 'pbar'); var fill = el('span'); fill.style.width = ((p && p.pct) ? Math.min(100, p.pct * 100) : 0) + '%'; bar.appendChild(fill); li.appendChild(bar);
+        last.appendChild(el('span', 'last-ch', '讀到 ' + (p.title || ('第 ' + (p.ch + 1) + ' 章'))));
+        last.appendChild(el('span', 'last-pct', pctStr(p.pct)));
+      } else last.appendChild(el('span', 'last-ch muted', '尚未開始閱讀'));
+      prog.appendChild(last);
+      var bar = el('div', 'pbar'); var fill = el('span'); fill.style.width = pct + '%'; bar.appendChild(fill); prog.appendChild(bar);
+      if (p && typeof p.ch === 'number') prog.appendChild(el('div', 'book-sub', '章節 ' + (p.ch + 1) + (b.chapters ? ' / ' + b.chapters : '') + (p.t ? ' · ' + fmtTime(p.t) : '')));
+      li.appendChild(prog);
       var act = el('div', 'book-actions');
       var go = el('button', 'btn primary', p ? '繼續閱讀' : '開始閱讀'); go.type = 'button'; go.dataset.act = 'read'; act.appendChild(go);
+      var more = el('button', 'icon-btn more-btn', '⋯'); more.type = 'button'; more.dataset.act = 'more';
+      more.setAttribute('aria-label', '更多操作'); more.title = '更多操作'; more.setAttribute('aria-expanded', 'false'); more.setAttribute('aria-controls', 'more-' + e.id);
+      act.appendChild(more);
       li.appendChild(act);
-      var act2 = el('div', 'book-actions sec');
+      var mp = el('div', 'book-more'); mp.id = 'more-' + e.id; mp.hidden = true;
+      var act2 = el('div', 'more-btns');
       var btns = kind === 'local' ? [e.drive ? null : ['rename', '改書名'], p ? ['reset', '清除進度'] : null, ['delete', '刪除']]
                                   : [p ? ['reset', '清除進度'] : null, e.meta ? ['uncache', '清除快取'] : null];
       btns.forEach(function (x) {
         if (!x) return;
         var bt = el('button', 'btn small' + (x[0] === 'delete' ? ' danger' : ''), x[1]); bt.type = 'button'; bt.dataset.act = x[0]; act2.appendChild(bt);
       });
-      if (act2.children.length) li.appendChild(act2);
+      if (act2.children.length) mp.appendChild(act2);
+      info.forEach(function (t) { mp.appendChild(el('p', 'more-info', t)); });
       var notes = (b.notes || []).concat(b.analysis || []).concat(e.drive && e.drive.dupNote ? [e.drive.dupNote] : []);
       if (notes.length) {
         var det = el('details'); det.appendChild(el('summary', null, '章節檢查（' + notes.length + ' 項）'));
-        var ul = el('ul'); notes.forEach(function (n) { ul.appendChild(el('li', null, n)); }); det.appendChild(ul); li.appendChild(det);
+        var ul = el('ul'); notes.forEach(function (n) { ul.appendChild(el('li', null, n)); }); det.appendChild(ul); mp.appendChild(det);
       }
+      li.appendChild(mp);
       li = cardEl; li.appendChild(body); setCardFold(li, isCollapsed(e.id));
       grid.appendChild(li);
     });
@@ -857,16 +874,16 @@
     return wakeP;
   }
   function renderSync() {
-    var t, cls = syncStat.s;
+    var t, tip = '', cls = syncStat.s;
     var dirty = !!sget(KEY_DIRTY);
     if (!cloudOn()) t = '';
     else if (syncStat.s === 'syncing') t = '同步中…';
     else if (syncStat.s === 'offline' || (!navigator.onLine && cloudOn())) { t = '離線，稍後同步'; cls = 'offline'; }
-    else if (syncStat.s === 'needauth') t = '需要重新連線 Google 才能同步（按「立即同步」）';
-    else if (syncStat.s === 'error') t = '同步錯誤：' + syncStat.msg;
-    else if (syncInfo.at) t = (dirty ? '有變更待同步 · 上次' : '已同步 ') + fmtTime(syncInfo.at);
-    else t = dirty ? '有變更待同步' : '尚未同步';
-    Array.prototype.forEach.call(document.querySelectorAll('.sync-status'), function (n) { n.textContent = t; n.dataset.s = cls; });
+    else if (syncStat.s === 'needauth') { t = '需重新連線'; tip = '需要重新連線 Google 才能同步，按 ⟳'; }
+    else if (syncStat.s === 'error') { t = '同步錯誤'; tip = '同步錯誤：' + syncStat.msg; }
+    else if (syncInfo.at) { t = dirty ? '待同步' : '已同步 ' + fmtTime(syncInfo.at); tip = (dirty ? '有變更待同步 · 上次同步 ' : '上次同步 ') + fmtTime(syncInfo.at); if (dirty) cls = 'dirty'; }
+    else { t = dirty ? '待同步' : '尚未同步'; if (dirty) cls = 'dirty'; }
+    Array.prototype.forEach.call(document.querySelectorAll('.sync-status'), function (n) { n.textContent = t; n.dataset.s = cls; n.title = tip || t; });
   }
   function fmtTime(t) {
     var d = new Date(t), now = new Date();
@@ -879,13 +896,16 @@
     $('cloudDisabled').hidden = CLOUD;
     $('btnSignIn').disabled = !CLOUD;
     var on = cloudOn(), a = CLOUD ? ND.account() : {};
-    $('btnSignIn').hidden = on; $('btnSignOut').hidden = !on; $('cloudSync').hidden = !on;
-    $('cloudAccount').textContent = !CLOUD ? '' : on ? (a.email ? a.email : '已登入') + (ND.hasToken() ? '' : '（需重新連線）') : '未登入';
+    $('btnSignIn').hidden = on || !CLOUD; $('btnSignOut').hidden = !on; $('cloudSync').hidden = !on; $('btnCloudMenu').hidden = !on;
+    if (!on) closeCloudMenu();
+    $('cloudAccount').textContent = !CLOUD ? '未啟用' : on ? (a.email ? a.email : '已登入') : '未登入';
+    $('cloudAccount').title = $('cloudAccount').textContent;
     $('rowCloud').hidden = !on;
     $('footLocal').hidden = on; $('footCloud').hidden = !on;
     box.dataset.on = on ? '1' : '0';
     renderSync();
   }
+  function closeCloudMenu() { $('cloudMenu').hidden = true; $('btnCloudMenu').setAttribute('aria-expanded', 'false'); }
   function signIn() {
     if (!CLOUD) return;
     if (!navigator.onLine) { toast('目前離線，無法登入 Google'); return; }
@@ -949,6 +969,7 @@
     var li = b.closest('.book-card'); if (!li) return;
     var id = li.dataset.id, act = b.dataset.act;
     if (act === 'fold') toggleCard(li);
+    else if (act === 'more') { var mp = li.querySelector('.book-more'); mp.hidden = !mp.hidden; b.setAttribute('aria-expanded', mp.hidden ? 'false' : 'true'); }
     else if (act === 'read') { cloudWake(true); location.hash = '#/read/' + id; }
     else if (act === 'uncache') uncacheBook(id);
     else if (act === 'delete') deleteBook(id);
@@ -957,6 +978,11 @@
       if (confirm('確定要清除「' + findBook(id).title + '」的閱讀進度與書籤嗎？')) { delete progress.books[id]; deleted[id] = Date.now(); saveDeleted(); touch(); renderShelf(); }
     }
   });
+  $('btnCloudMenu').addEventListener('click', function (e) {
+    e.stopPropagation(); var m = $('cloudMenu'); m.hidden = !m.hidden; this.setAttribute('aria-expanded', m.hidden ? 'false' : 'true');
+  });
+  $('cloudMenu').addEventListener('click', function () { setTimeout(closeCloudMenu, 0); });
+  document.addEventListener('click', function (e) { if (!$('cloudMenu').hidden && !e.target.closest('#cloudMenu')) closeCloudMenu(); });
   $('btnFoldAll').addEventListener('click', function () { foldAll(this.dataset.mode !== 'expand'); });
   $('btnPickBooks').addEventListener('click', pickBooks);
   $('fileBooks').addEventListener('change', function (e) { importFiles(e.target.files); });
@@ -1029,7 +1055,7 @@
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     var tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' && e.target.type !== 'range') { if (e.key === 'Escape') e.target.blur(); return; }
-    if (e.key === 'Escape') { closeDrawer(); closeSettings(); return; }
+    if (e.key === 'Escape') { closeDrawer(); closeSettings(); closeCloudMenu(); return; }
     if (state.view !== 'read' || !state.book) return;
     var modal = !$('drawer').hidden || !$('settingsPanel').hidden;
     if (e.key === 'ArrowLeft' && !modal) { e.preventDefault(); gotoChapter(state.ch - 1); }
