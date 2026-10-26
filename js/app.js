@@ -382,7 +382,7 @@
     state.ch = idx; state.restoring = true;
     var c = book.chapters[idx];
     $('chapterTitle').textContent = c[0];
-    $('barChapter').textContent = c[0];
+    $('barChapter').textContent = String(c[0] || '').trim(); $('barChapter').parentNode.title = (state.book && state.book.title ? state.book.title + ' · ' : '') + String(c[0] || '').trim();
     document.title = c[0] + ' — ' + book.title;
     var body = $('chapterBody'); body.textContent = '';
     var frag = document.createDocumentFragment();
@@ -391,7 +391,7 @@
     var paras = window.Typeset.layout(c[1], tsOn);
     state.rawN = paras.length ? paras[paras.length - 1].start + paras[paras.length - 1].count : 0;
     paras.forEach(function (q) {
-      var pe = el('p', null, tsOn ? q.text.replace(/^[\s　]+/, '') : q.text);   // textContent → 自動跳脫 HTML
+      var pe = el('p', null, q.text.replace(/^[\s\u3000\u00a0\ufeff]+/, ''));   // 開頭空白一律去掉，縮排交給 CSS   // textContent → 自動跳脫 HTML
       pe.dataset.s = q.start; pe.dataset.n = q.count; frag.appendChild(pe);
     });
     if (!frag.childNodes.length) frag.appendChild(el('p', 'empty', '（本章沒有內容）'));
@@ -615,7 +615,7 @@
   function processInWorker(name, buf, onProg) {
     return new Promise(function (resolve, reject) {
       var w;
-      try { w = new Worker('js/worker.js?v=7'); } catch (e) { return fallback(); }
+      try { w = new Worker('js/worker.js?v=8'); } catch (e) { return fallback(); }
       var got = false;
       w.onmessage = function (ev) {
         var d = ev.data; got = true;

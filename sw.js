@@ -5,7 +5,7 @@
      （GitHub Pages 回應 max-age=600，舊版 SW 用一般 fetch 會在 10 分鐘內拿到舊檔）。
    - 頁面、CSS、JS、manifest：網路優先（cache:'no-cache' 以 ETag 重新驗證），失敗或逾時才用快取 → 更新下次載入就生效，離線仍可用。
    - 圖示等其他靜態檔：快取優先。 */
-var VERSION = 'nrw-v7';
+var VERSION = 'nrw-v8';
 var SHELL = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/config.js', 'js/drive.js', 'js/splitter.js', 'js/typeset.js', 'js/worker.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 var NET_TIMEOUT = 4000;

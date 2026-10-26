@@ -79,14 +79,14 @@ button,input{font:inherit;color:inherit}
 /* reader */
 .topbar{position:fixed;top:0;left:0;right:0;height:var(--bar-h);background:var(--bar);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.2rem;padding:var(--sat) calc(.4rem + var(--sar)) 0 calc(.4rem + var(--sal));z-index:20;transition:transform .2s}
 .topbar.off{transform:translateY(-101%)}
-.topbar-title{flex:1;min-width:0;padding:0 .3rem;line-height:1.2}
-.bar-book{font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bar-chapter{font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-title{flex:1;min-width:0;padding:0 .5rem;display:flex;align-items:center;align-self:stretch;overflow:hidden}
+.bar-book{display:none}
+.bar-chapter{flex:1;min-width:0;font:500 15px/20px system-ui,-apple-system,"Segoe UI","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chapter-bar{position:absolute;left:0;right:0;bottom:-1px;height:2px;background:transparent}
 .chapter-bar span{display:block;height:100%;width:0;background:var(--accent)}
 .article{max-width:var(--maxw);margin:0 auto;padding:calc(var(--bar-h) + 1.2rem) calc(1.1rem + var(--sar)) calc(4rem + var(--sab)) calc(1.1rem + var(--sal));outline:none}
 .chapter-title{font-size:calc(var(--fs) * 1.25);line-height:1.4;margin:.4em 0 1em;text-align:center}
-.chapter-body p{margin:0 0 .8em;font-size:var(--fs);line-height:var(--lh);color:var(--text);text-indent:2em;text-align:justify;text-justify:inter-character;line-break:strict;hanging-punctuation:allow-end;word-break:normal;overflow-wrap:anywhere;font-kerning:none;-webkit-font-smoothing:antialiased}
+.chapter-body p{margin:0 0 .8em;font-size:var(--fs);line-height:var(--lh);color:var(--text);text-indent:2em;text-align:justify;text-justify:inter-character;line-break:strict;hanging-punctuation:none;text-spacing-trim:space-all;word-break:normal;overflow-wrap:anywhere;font-kerning:none;-webkit-font-smoothing:antialiased}
 .chapter-body p.empty{text-indent:0;color:var(--muted);text-align:center}
 .chapter-end{display:flex;align-items:center;gap:.8rem;margin:2.2rem 0 1.4rem;color:var(--muted);font-size:var(--t-sm);letter-spacing:.08em;font-family:system-ui,sans-serif}
 .chapter-end::before,.chapter-end::after{content:"";flex:1;height:1px;background:var(--line)}
