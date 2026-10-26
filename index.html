@@ -94,12 +94,13 @@
     <div id="chapterBody" class="chapter-body"></div>
     <div id="chapterEnd" class="chapter-end" aria-hidden="true"><span id="endMark">本章完</span></div>
     <nav class="chapter-nav" aria-label="章節導覽">
-      <button type="button" id="btnNext2" class="next-card"><span class="nx-label">下一章 →</span><span id="nextTitle" class="nx-title"></span></button>
-      <button type="button" id="btnShelf2" class="next-card done" hidden><span class="nx-label">已讀到最後一章</span><span class="nx-title">回到書架</span></button>
-      <div class="nav-sub">
-        <button type="button" id="btnPrev2" class="sub-btn">← 上一章</button>
-        <button type="button" id="btnToc2" class="sub-btn">☰ 目錄</button>
+      <div class="nav-row">
+        <button type="button" id="btnPrev2" class="nav-btn ghost">← 上一章</button>
+        <button type="button" id="btnToc2" class="nav-btn ghost">☰ 目錄</button>
+        <button type="button" id="btnNext2" class="nav-btn primary">下一章 →</button>
+        <button type="button" id="btnShelf2" class="nav-btn primary" hidden>回書架</button>
       </div>
+      <p id="nextTitle" class="nx-hint"></p>
     </nav>
   </article>
 
