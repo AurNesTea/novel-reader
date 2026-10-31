@@ -15,7 +15,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/style.css?v=8">
+<link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
 
@@ -93,15 +93,10 @@
     <h2 id="chapterTitle" class="chapter-title"></h2>
     <div id="chapterBody" class="chapter-body"></div>
     <div id="chapterEnd" class="chapter-end" aria-hidden="true"><span id="endMark">本章完</span></div>
-    <nav class="chapter-nav" aria-label="章節導覽">
-      <div class="nav-row">
-        <button type="button" id="btnPrev2" class="nav-btn ghost">← 上一章</button>
-        <button type="button" id="btnToc2" class="nav-btn ghost toc">☰ 目錄</button>
-        <button type="button" id="btnNext2" class="nav-btn primary">下一章 →</button>
-        <button type="button" id="btnShelf2" class="nav-btn primary" hidden>回書架</button>
-      </div>
+    <div class="chapter-after">
       <p id="nextTitle" class="nx-hint"></p>
-    </nav>
+      <button type="button" id="btnShelf2" class="nx-link" hidden>回書架</button>
+    </div>
   </article>
 
   <nav id="bottombar" class="bottombar" aria-label="章節切換">
@@ -221,10 +216,10 @@
 <input id="fileBooks" type="file" accept=".txt,.js,text/*" multiple hidden>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/config.js?v=8"></script>
-<script src="js/splitter.js?v=8"></script>
-<script src="js/drive.js?v=8"></script>
-<script src="js/typeset.js?v=8"></script>
-<script src="js/app.js?v=8"></script>
+<script src="js/config.js?v=9"></script>
+<script src="js/splitter.js?v=9"></script>
+<script src="js/drive.js?v=9"></script>
+<script src="js/typeset.js?v=9"></script>
+<script src="js/app.js?v=9"></script>
 </body>
 </html>

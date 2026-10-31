@@ -397,9 +397,9 @@
     if (!frag.childNodes.length) frag.appendChild(el('p', 'empty', '（本章沒有內容）'));
     body.appendChild(frag);
     var atFirst = idx === 0, atLast = idx === book.chapters.length - 1;
-    ['btnPrev', 'btnPrev2'].forEach(function (i) { $(i).disabled = atFirst; });
-    ['btnNext', 'btnNext2'].forEach(function (i) { $(i).disabled = atLast; });
-    $('btnNext2').hidden = atLast; $('btnShelf2').hidden = !atLast;
+    $('btnPrev').disabled = atFirst;
+    $('btnNext').disabled = atLast;
+    $('btnShelf2').hidden = !atLast;
     $('nextTitle').textContent = atLast ? '' : '下一章：' + book.chapters[idx + 1][0];
     var m = /^\s*(第\s*[0-9０-９零〇一二兩三四五六七八九十百千萬]+\s*[章回節卷集話])/.exec(c[0]);
     $('endMark').textContent = atLast ? '全書完' : (m ? m[1].replace(/\s+/g, '') + ' 完' : '本章完');
@@ -615,7 +615,7 @@
   function processInWorker(name, buf, onProg) {
     return new Promise(function (resolve, reject) {
       var w;
-      try { w = new Worker('js/worker.js?v=8'); } catch (e) { return fallback(); }
+      try { w = new Worker('js/worker.js?v=9'); } catch (e) { return fallback(); }
       var got = false;
       w.onmessage = function (ev) {
         var d = ev.data; got = true;
@@ -1014,7 +1014,6 @@
   $('btnBack').addEventListener('click', function () { saveNow(); cloudWake(true); location.hash = '#/'; });
   function wakeIfDirty() { if (cloudOn() && !ND.hasToken() && sget(KEY_DIRTY) && navigator.onLine) cloudWake(true); }
   $('btnToc').addEventListener('click', function () { openDrawer('toc'); });
-  $('btnToc2').addEventListener('click', function () { openDrawer('toc'); });
   $('btnShelf2').addEventListener('click', function () { $('btnBack').click(); });
   $('btnBookmark').addEventListener('click', addBookmark);
   $('btnSettings').addEventListener('click', openSettings);
@@ -1023,8 +1022,8 @@
   $('settingsMask').addEventListener('click', closeSettings);
   $('btnCloseDrawer').addEventListener('click', closeDrawer);
   $('drawerMask').addEventListener('click', closeDrawer);
-  ['btnPrev', 'btnPrev2'].forEach(function (i) { $(i).addEventListener('click', function () { gotoChapter(state.ch - 1); wakeIfDirty(); }); });
-  ['btnNext', 'btnNext2'].forEach(function (i) { $(i).addEventListener('click', function () { gotoChapter(state.ch + 1); wakeIfDirty(); }); });
+  $('btnPrev').addEventListener('click', function () { gotoChapter(state.ch - 1); wakeIfDirty(); });
+  $('btnNext').addEventListener('click', function () { gotoChapter(state.ch + 1); wakeIfDirty(); });
   $('btnSignIn').addEventListener('click', signIn);
   $('btnSignOut').addEventListener('click', signOut);
   Array.prototype.forEach.call(document.querySelectorAll('.btn-sync'), function (b) {

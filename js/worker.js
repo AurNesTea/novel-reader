@@ -1,5 +1,5 @@
 /* 匯入用 Web Worker：解碼 → 切章，避免 5MB 檔案卡住畫面 */
-importScripts('splitter.js?v=8');
+importScripts('splitter.js?v=9');
 self.onmessage = function (e) {
   var d = e.data, last = 0;
   function prog(stage, frac) {
